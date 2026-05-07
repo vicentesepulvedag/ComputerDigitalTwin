@@ -1,0 +1,16 @@
+# Archivos de Máquinas Virtuales
+*.vdi
+*.vmdk
+*.vhd
+*.ova
+*.iso
+
+# Logs locales y bases de datos vectoriales
+/logs/
+/chromadb_data/
+*.log
+
+# Entornos virtuales de Python y variables de entorno
+.env
+venv/
+__pycache__/
