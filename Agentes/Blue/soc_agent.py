@@ -1,6 +1,7 @@
 import os
 import json
 import random
+import subprocess
 import google.generativeai as genai
 
 from dotenv import load_dotenv
@@ -15,19 +16,41 @@ if not GOOGLE_API_KEY:
 genai.configure(api_key=GOOGLE_API_KEY)
 gemini_model = genai.GenerativeModel('gemini-2.5-flash')
 
+# -----------------------------
+# 1. CAPTURA DE LOGS REALES (RED)
+# -----------------------------
+def capturar_trafico_red(segundos=15, quiet=False):
+    if not quiet: print(f"\n[+] Escuchando la red del laboratorio (virbr1) durante {segundos} segundos...")
+    if not quiet: print("[!] (¡Rápido! Ve a la otra consola y lanza tu Hacker_Agent)")
+    try:
+        # Usamos timeout o en su defecto comunicamos python a nivel de sleep
+        import time
+        comando_tcpdump = ["tcpdump", "-i", "virbr1", "-n", "-l"]
+        proceso = subprocess.Popen(comando_tcpdump, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        
+        time.sleep(segundos)
+        
+        # Detener la captura enviando CTR+C de forma limpia al proceso subyacente
+        proceso.terminate()
+        try:
+            proceso.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            proceso.kill()
 
-# -----------------------------
-# LOGS SIMULADOS
-# -----------------------------
-logs = [
-    "[INFO] User login attempt from 192.168.1.100",
-    "[WARNING] Multiple failed login attempts for 'admin' from 203.0.113.45",
-    "[ALERT] Suspicious SQL query detected on 'users' table: ' OR '1'='1 --",
-    "[INFO] Data extraction anomaly detected from financial database",
-    "[ERROR] Unauthenticated access attempt to '/admin' from 10.0.0.2",
-    "[CRITICAL] Malware detected: /tmp/exploit.exe downloaded by user 'john'",
-    "[WARNING] Cross-Site Scripting (XSS) payload detected in URL parameter: <script>alert('XSS')</script>"
-]
+        stdout, _ = proceso.communicate()
+        
+        # Procesamos la salida y la convertimos en una lista de logs
+        lineas = stdout.strip().split('\n')
+        logs = [linea for linea in lineas if linea and "tcpdump" not in linea.lower()]
+        
+        if not logs:
+            logs = ["[INFO] No se capturó tráfico malicioso en los 15 segundos."]
+            
+        if not quiet: print("[+] Captura finalizada.")
+        return logs
+    except FileNotFoundError:
+        if not quiet: print("[!] tcpdump no está instalado. Usa: sudo pacman -S tcpdump")
+        return ["[ERROR] Error de dependencia en el SOC."]
 
 # -----------------------------
 # 1. LLM ANALIZA LOGS
@@ -102,71 +125,3 @@ def clasificar(score):
     return "LOW"
 
 # -----------------------------
-# 3. CHATBOT
-# -----------------------------
-def chatbot():
-    print("🤖 Chatbot de Ciberseguridad (comandos: 'analizar', 'logs', 'ayuda', 'salir')")
-
-    while True:
-        user_input = input("\nTú: ")
-
-        if user_input.lower() == "salir":
-            print("Adiós. ¡Gracias por usar el Chatbot de Ciberseguridad!")
-            break
-
-        elif user_input.lower() == "analizar":
-            print("\nAnalizando logs con LLM...\n")
-
-            llm_response = analizar_logs_llm(logs)
-
-            if llm_response and 'vulnerabilities' in llm_response:
-                vulnerabilities = llm_response['vulnerabilities']
-                if vulnerabilities:
-                    vuln = random.choice(vulnerabilities)
-
-                    metrics_for_cvss = vuln.get('CVSS_metrics', {})
-                    if all(k in metrics_for_cvss for k in ['AV', 'AC', 'PR', 'UI', 'C', 'I', 'A']):
-                        score = calcular_cvss(metrics_for_cvss)
-                        nivel = clasificar(score)
-
-                        print("🤖 Resultado:")
-                        print(f"- Tipo de vulnerabilidad: {vuln.get('type', 'Desconocido')}")
-                        print(f"- Descripción: {vuln.get('description', 'No hay descripción disponible.')}")
-                        print(f"- CVSS Score: {score}")
-                        print(f"- Severidad: {nivel}")
-
-                        if vuln.get('recommendations'):
-                            print("\nRecomendaciones:")
-                            for rec in vuln['recommendations']:
-                                print(f"- {rec}")
-                        print("\n" + "="*40 + "\n") # Separador
-                    else:
-                        print("Error: No se encontraron todas las métricas CVSS necesarias para la vulnerabilidad seleccionada.")
-                        print(f"Métricas recibidas: {metrics_for_cvss}")
-                else:
-                    print("No se detectaron vulnerabilidades en los logs.")
-            else:
-                print("Error en el análisis o no se pudo interpretar la respuesta del LLM.")
-
-        elif user_input.lower() == "logs":
-            print("\n--- Logs actuales ---")
-            for i, log in enumerate(logs):
-                print(f"{i+1}. {log}")
-            print("---------------------")
-
-        elif user_input.lower() == "ayuda":
-            print("\n--- Comandos disponibles ---")
-            print("'analizar': Procesa los logs actuales para detectar vulnerabilidades.")
-            print("'logs': Muestra la lista de logs que se están analizando.")
-            print("'ayuda': Muestra esta lista de comandos.")
-            print("'salir': Finaliza la conversación con el chatbot.")
-            print("--------------------------")
-
-        else:
-            print("Comando no reconocido. Por favor, usa 'analizar', 'logs', 'ayuda' o 'salir'.")
-
-# -----------------------------
-# MAIN
-# -----------------------------
-if __name__ == "__main__":
-    chatbot()
