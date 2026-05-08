@@ -1,127 +1,79 @@
+import sys
 import os
 import json
-import random
-import subprocess
-import google.generativeai as genai
+from openai import OpenAI
 
-from dotenv import load_dotenv
-load_dotenv()
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-# Configuración de Gemini
-GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
+from config.settings import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, IFACE
+from Infraestructura.network import run_tcpdump_capture
+from Infraestructura.log_parser import filter_relevant_logs
 
-if not GOOGLE_API_KEY:
-    raise ValueError("Por favor, configura la variable de entorno GOOGLE_API_KEY.")
+if not LLM_API_KEY:
+    raise ValueError("Por favor, configura la variable de entorno LLM_API_KEY (Asegúrate de crear un archivo '.env' en la raíz con la llave).")
 
-genai.configure(api_key=GOOGLE_API_KEY)
-gemini_model = genai.GenerativeModel('gemini-2.5-flash')
+# Usamos el cliente OpenAI, compatible con Groq, DeepSeek, OpenRouter, etc.
+client = OpenAI(api_key=LLM_API_KEY, base_url=LLM_BASE_URL)
 
-# -----------------------------
-# 1. CAPTURA DE LOGS REALES (RED)
-# -----------------------------
-def capturar_trafico_red(segundos=15, quiet=False):
-    if not quiet: print(f"\n[+] Escuchando la red del laboratorio (virbr1) durante {segundos} segundos...")
-    if not quiet: print("[!] (¡Rápido! Ve a la otra consola y lanza tu Hacker_Agent)")
+def capturar_trafico(segundos: int = 15) -> dict:
+    """Invoca la infraestructura para capturar logs reales."""
     try:
-        # Usamos timeout o en su defecto comunicamos python a nivel de sleep
-        import time
-        comando_tcpdump = ["tcpdump", "-i", "virbr1", "-n", "-l"]
-        proceso = subprocess.Popen(comando_tcpdump, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        
-        time.sleep(segundos)
-        
-        # Detener la captura enviando CTR+C de forma limpia al proceso subyacente
-        proceso.terminate()
-        try:
-            proceso.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            proceso.kill()
+        res = run_tcpdump_capture(interface=IFACE, timeout_sec=segundos)
+        return {"status": "success", "logs": res["logs"]}
+    except Exception as e:
+        return {"status": "error", "message": str(e), "logs": []}
 
-        stdout, _ = proceso.communicate()
-        
-        # Procesamos la salida y la convertimos en una lista de logs
-        lineas = stdout.strip().split('\n')
-        logs = [linea for linea in lineas if linea and "tcpdump" not in linea.lower()]
-        
-        if not logs:
-            logs = ["[INFO] No se capturó tráfico malicioso en los 15 segundos."]
-            
-        if not quiet: print("[+] Captura finalizada.")
-        return logs
-    except FileNotFoundError:
-        if not quiet: print("[!] tcpdump no está instalado. Usa: sudo pacman -S tcpdump")
-        return ["[ERROR] Error de dependencia en el SOC."]
+def analizar_logs_llm(logs: list) -> dict:
+    """Envía los logs capturados al LLM y retorna un dict con las vulnerabilidades."""
+    logs_limpios = filter_relevant_logs(logs)
+    if not logs_limpios:
+        return {"vulnerabilities": []}
 
-# -----------------------------
-# 1. LLM ANALIZA LOGS
-# -----------------------------
-def analizar_logs_llm(logs):
     prompt = f"""
-Eres un experto en ciberseguridad. Tu tarea es analizar logs de seguridad para identificar vulnerabilidades y posibles ataques. Para cada vulnerabilidad o ataque detectado, debes proporcionar su tipo, las métricas CVSS v3.1 base (AV, AC, PR, UI, C, I, A) y recomendaciones específicas. Si no encuentras vulnerabilidades claras, puedes indicar que no hay.
-
-Analiza los siguientes logs y responde SOLO en formato JSON. Si detectas múltiples vulnerabilidades, listalas en un array. Si no detectas ninguna, el array debe estar vacío.
-
-Logs:
-{logs}
-
-Formato de la salida JSON (ejemplo con una vulnerabilidad):
-{{
-  "vulnerabilities": [
-    {{
-      "type": "Inyección SQL",
-      "description": "Intento de inyección SQL detectado en la tabla 'usuarios' con un payload común.",
-      "CVSS_metrics": {{
-        "AV": 0.85, "AC": 0.77, "PR": 0.85, "UI": 0.85, "C": 0.56, "I": 0.56, "A": 0.22
-      }},
-      "recommendations": [
-        "Implementar sentencias preparadas o consultas parametrizadas.",
-        "Validar y sanitizar toda la entrada de usuario.",
-        "Usar un Firewall de Aplicaciones Web (WAF) para filtrar solicitudes maliciosas."
-      ]
-    }}
-  ]
-}}
-
-Si no se detecta ninguna vulnerabilidad:
-{{"vulnerabilities": []}}
+Eres un experto en ciberseguridad. Analiza estos logs:
+{logs_limpios}
+    
+Responde SOLO en JSON indicando vulnerabilidades, tipo, métricas CVSS_metrics (AV, AC, PR, UI, C, I, A) usando sus valores numéricos (float), y recomendaciones.
+Si no hay, devuelve {{"vulnerabilities": []}}
 """
-
-    # Usa el modelo de Gemini para generar contenido
-    response = gemini_model.generate_content(prompt)
-
-    content = response.text
-
-    # Extraer el JSON de la respuesta si está envuelto en un bloque de código markdown
-    if content.startswith('```json') and content.endswith('```'):
-        content = content[len('```json'):-len('```')].strip()
-
     try:
+        response = client.chat.completions.create(
+            model=LLM_MODEL,
+            messages=[
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.1
+        )
+        content = response.choices[0].message.content.strip()
+        if content.startswith('```json') and content.endswith('```'):
+            content = content[len('```json'):-len('```')].strip()
         return json.loads(content)
     except Exception as e:
-        print("Error interpretando respuesta del LLM:")
-        print(f"Contenido: {content}")
-        print(f"Error: {e}")
-        return None
+        raise RuntimeError(f"Error procesando LLM: {str(e)}")
 
-# -----------------------------
-# 2. CVSS
-# -----------------------------
-def calcular_cvss(metrics):
-    C, I, A = metrics["C"], metrics["I"], metrics["A"]
-    AV, AC, PR, UI = metrics["AV"], metrics["AC"], metrics["PR"], metrics["UI"]
+def calcular_cvss(metrics: dict) -> float:
+    try:
+        # Convertimos explícitamente a float por si el LLM devuelve las métricas como strings (ej. "0.5")
+        C = float(metrics.get("C", 0.0))
+        I = float(metrics.get("I", 0.0))
+        A = float(metrics.get("A", 0.0))
+        AV = float(metrics.get("AV", 0.0))
+        AC = float(metrics.get("AC", 0.0))
+        PR = float(metrics.get("PR", 0.0))
+        UI = float(metrics.get("UI", 0.0))
+    except (ValueError, TypeError):
+        # Si la IA alucina y devuelve palabras (ej. "High"), evitamos el crash devolviendo un valor por defecto.
+        return 0.0
 
     impact = 1 - (1 - C) * (1 - I) * (1 - A)
     impact_score = 6.42 * impact
-
     exploitability = 8.22 * AV * AC * PR * UI
 
     base_score = min(impact_score + exploitability, 10)
     return round(base_score, 2)
 
-def clasificar(score):
+def clasificar(score: float) -> str:
     if score >= 9: return "CRITICAL"
     if score >= 7: return "HIGH"
     if score >= 4: return "MEDIUM"
     return "LOW"
-
-# -----------------------------
