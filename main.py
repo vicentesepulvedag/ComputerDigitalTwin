@@ -1,6 +1,7 @@
 import sys
 import time
 import threading
+import subprocess
 
 from config.settings import VM_NAME, SNAPSHOT
 from Infraestructura.vm_manager import restore_snapshot, start_vm
@@ -88,13 +89,23 @@ def simular_ciberataque():
                 )
                 print("-" * 60)
                 print(f"🚨 Amenaza detectada: {vuln.get('type', 'Desconocido')}")
-                print(f"📝 Descripción detallada: {vuln.get('description', '')}")
+                # Usar textwrap para formatear la descripción y que no sea una línea infinita
+                descripcion = vuln.get("description", "Sin descripción detallada.")
+                print("📝 Descripción detallada:")
+                import textwrap
+                for linea in textwrap.wrap(descripcion, width=70):
+                    print(f"   {linea}")
                 print(f"⚠️  Gravedad (CVSS 3.1): {score} [{nivel}]")
 
                 if vuln.get("recommendations"):
                     print("\n🛡️ RECOMENDACIONES DE MITIGACIÓN:")
-                    for rec in vuln["recommendations"]:
-                        print(f"   * {rec}")
+                    # Si el LLM devolvió un string en lugar de una lista, lo imprimimos directamente.
+                    recs = vuln["recommendations"]
+                    if isinstance(recs, str):
+                        print(f"   * {recs}")
+                    elif isinstance(recs, list):
+                        for rec in recs:
+                            print(f"   * {rec}")
             else:
                 print(
                     "[!] La IA determinó que el tráfico era benigno o no se encontraron vulnerabilidades claras."
@@ -108,6 +119,14 @@ def simular_ciberataque():
 
 
 def menu_interactivo():
+    # Cacheamos las credenciales de sudo al inicio para que no interrumpa el output asíncrono
+    try:
+        print("[*] Verificando permisos de superusuario...")
+        subprocess.run(["sudo", "-v"], check=True)
+    except subprocess.CalledProcessError:
+        print("[!] Error, se necesitan permisos para ejecutar Nmap/tcpdump.")
+        sys.exit(1)
+
     while True:
         print("\n" + "#" * 50)
         print("👑 ORQUESTADOR GLOBAL - COMPUTER DIGITAL TWIN")
@@ -121,9 +140,21 @@ def menu_interactivo():
         if opcion == "1":
             simular_ciberataque()
         elif opcion == "2":
-            print(
-                "El Red Team puede activarse importando e invocando 'ejecutar_ataque()' de hacker_agent.py"
-            )
+            print("\n" + "=" * 60)
+            print("🔴 INICIANDO ATAQUE MANUAL (RED TEAM)")
+            print("=" * 60)
+            
+            print("[*] Iniciando ataque. Por favor espera...")
+            resultado = ejecutar_ataque()
+            
+            if resultado["status"] == "success":
+                print(f"[✅] Ataque finalizado con éxito.\n")
+                print("Resultados del escaneo:")
+                print("-" * 40)
+                print(resultado["data"])
+                print("-" * 40)
+            else:
+                print(f"[❌] Error en el ataque: {resultado['message']}")
         elif opcion == "3":
             print("Saliendo del simulador...")
             sys.exit(0)

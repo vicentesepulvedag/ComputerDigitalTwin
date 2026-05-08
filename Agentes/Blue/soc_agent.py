@@ -39,8 +39,15 @@ def analizar_logs_llm(logs: list) -> dict:
 Eres un experto en ciberseguridad. Analiza estos logs:
 {logs_limpios}
     
-Responde SOLO en JSON indicando vulnerabilidades, tipo, métricas CVSS_metrics (AV, AC, PR, UI, C, I, A) usando sus valores numéricos (float), y recomendaciones.
-Si no hay, devuelve {{"vulnerabilities": []}}
+Responde SOLO en JSON indicando:
+- "vulnerabilities": Lista de vulnerabilidades.
+Dentro de cada elemento de "vulnerabilities":
+- "type": Nombre de la amenaza.
+- "description": Explicación muy detallada (al menos 3 oraciones) de lo que está ocurriendo según los logs.
+- "CVSS_metrics": Diccionario con las llaves "AV", "AC", "PR", "UI", "C", "I", "A" usando sus valores numéricos (float).
+- "recommendations": Lista de recomendaciones puntuales.
+
+Si el tráfico es benigno o no hay atacantes, devuelve {{"vulnerabilities": []}}.
 """
     try:
         response = client.chat.completions.create(
