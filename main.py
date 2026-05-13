@@ -14,11 +14,11 @@ from Agentes.Blue.soc_agent import (
 )
 
 
-def accion_hacker_en_segundo_plano():
-    print("[Red Team] Hacker preparado. Lanzando ataque en 2 segundos...")
+def accion_hacker_en_segundo_plano(modo="normal"):
+    print(f"[Red Team] Hacker preparado (Modo: {modo}). Lanzando ataque en 2 segundos...")
     time.sleep(2)
 
-    resultado = ejecutar_ataque()
+    resultado = ejecutar_ataque(modo=modo)
     if resultado["status"] == "success":
         print(
             f"\n[Red Team] Ataque completado. \nPreview: {resultado['data'][:200]}...\n"
@@ -27,7 +27,7 @@ def accion_hacker_en_segundo_plano():
         print(f"[!] Error en Red Team: {resultado['message']}")
 
 
-def simular_ciberataque():
+def simular_ciberataque(modo_ataque="normal"):
     print("\n" + "=" * 60)
     print("🚀 INICIANDO SIMULACIÓN DE CIBERATAQUE (RED vs BLUE)")
     print("=" * 60)
@@ -52,11 +52,15 @@ def simular_ciberataque():
         print("\n[>>>] FASE 2: Ejecución del Ataque y Monitoreo del SOC")
         print(f"[+] Iniciando SOC Manager...")
 
-        hilo_hacker = threading.Thread(target=accion_hacker_en_segundo_plano)
+        hilo_hacker = threading.Thread(target=accion_hacker_en_segundo_plano, args=(modo_ataque,))
         hilo_hacker.start()
 
-        print("[+] Blue Team: Escuchando tráfico...")
-        resultado_captura = capturar_trafico(segundos=15)
+        # Si el ataque es de vulnerabilidad suele tardar más, aumentamos el tiempo de escucha
+        tiempo_escucha = 15 if modo_ataque == "normal" else 45
+        print(f"[+] Blue Team: Escuchando tráfico por {tiempo_escucha} segundos...")
+        resultado_captura = capturar_trafico(segundos=tiempo_escucha, modo=modo_ataque)
+        
+        # Esperamos a que los hilos terminen
         hilo_hacker.join()
 
         # FASE 3: Análisis Forense por IA
@@ -131,21 +135,25 @@ def menu_interactivo():
         print("\n" + "#" * 50)
         print("👑 ORQUESTADOR GLOBAL - COMPUTER DIGITAL TWIN")
         print("#" * 50)
-        print("  1. Iniciar Simulación Completa (Ataque + SOC automatizado)")
-        print("  2. Iniciar solo Red Team (Manual)")
-        print("  3. Salir")
+        print("  1. Iniciar Simulación Completa (Ataque Básico + SOC automatizado)")
+        print("  2. Iniciar Simulación Completa (Ataque con Evaluación CVEs + SOC)")
+        print("  3. Iniciar solo Red Team (Manual Básico)")
+        print("  4. Iniciar solo Red Team (Evaluación de Vulnerabilidades/CVEs)")
+        print("  5. Salir")
 
-        opcion = input("\nElige una opción (1-3): ")
+        opcion = input("\nElige una opción (1-5): ")
 
         if opcion == "1":
-            simular_ciberataque()
+            simular_ciberataque(modo_ataque="normal")
         elif opcion == "2":
+            simular_ciberataque(modo_ataque="vuln")
+        elif opcion == "3":
             print("\n" + "=" * 60)
-            print("🔴 INICIANDO ATAQUE MANUAL (RED TEAM)")
+            print("🔴 INICIANDO ATAQUE MANUAL (RED TEAM BÁSICO)")
             print("=" * 60)
             
             print("[*] Iniciando ataque. Por favor espera...")
-            resultado = ejecutar_ataque()
+            resultado = ejecutar_ataque(modo="normal")
             
             if resultado["status"] == "success":
                 print(f"[✅] Ataque finalizado con éxito.\n")
@@ -155,7 +163,23 @@ def menu_interactivo():
                 print("-" * 40)
             else:
                 print(f"[❌] Error en el ataque: {resultado['message']}")
-        elif opcion == "3":
+        elif opcion == "4":
+            print("\n" + "=" * 60)
+            print("🔴 INICIANDO ATAQUE MANUAL (EVALUACIÓN DE VULNERABILIDADES)")
+            print("=" * 60)
+            
+            print("[*] Iniciando escaneo de vulnerabilidades con Nmap NSE. Por favor espera...")
+            resultado = ejecutar_ataque(modo="vuln")
+            
+            if resultado["status"] == "success":
+                print(f"[✅] Escaneo finalizado con éxito.\n")
+                print("Resultados del análisis de vulnerabilidades:")
+                print("-" * 40)
+                print(resultado["data"])
+                print("-" * 40)
+            else:
+                print(f"[❌] Error en el análisis: {resultado['message']}")
+        elif opcion == "5":
             print("Saliendo del simulador...")
             sys.exit(0)
         else:

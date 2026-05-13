@@ -2,7 +2,7 @@ import random
 
 # Importamos las funciones principales del SOC
 from Agentes.Blue.soc_agent import (
-    capturar_trafico_red,
+    capturar_trafico,
     analizar_logs_llm,
     calcular_cvss,
     clasificar,
@@ -79,7 +79,12 @@ def iniciar_chatbot():
             print(
                 "💡 CONSEJO: Tienes 15 segundos para lanzar hacker_agent.py en tu otra terminal"
             )
-            logs_actuales = capturar_trafico_red(segundos=15)
+            resultado = capturar_trafico(segundos=15)
+            if resultado.get("status") == "error":
+                print(f"[!] Error al capturar tráfico: {resultado.get('message', 'Desconocido')}")
+                logs_actuales = []
+            else:
+                logs_actuales = resultado.get("logs", [])
             print("\n--- Logs capturados recientemente ---")
             for i, log in enumerate(logs_actuales):
                 print(f"{i+1}. {log}")
