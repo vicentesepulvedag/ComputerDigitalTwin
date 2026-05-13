@@ -1,6 +1,7 @@
 import subprocess
 from config.settings import VM_PROVIDER
 
+
 def restore_snapshot(vm_name: str, snapshot_name: str) -> dict:
     """Restaura una máquina virtual a un snapshot específico."""
     if VM_PROVIDER.lower() == "virtualbox":
@@ -37,15 +38,21 @@ def start_vm(vm_name: str) -> dict:
 
     try:
         result = subprocess.run(command, capture_output=True, text=True)
-        
+
         if VM_PROVIDER.lower() == "virtualbox":
-            if "already locked" in result.stderr or "is already active" in result.stderr or "state is Saved" in result.stderr:
+            if (
+                "already locked" in result.stderr
+                or "is already active" in result.stderr
+                or "state is Saved" in result.stderr
+            ):
                 return {
                     "status": "success",
                     "message": f"La máquina '{vm_name}' ya estaba encendida o lista.",
                 }
             elif result.returncode != 0:
-                raise RuntimeError(f"Error iniciando la VM (VirtualBox): {result.stderr.strip()}")
+                raise RuntimeError(
+                    f"Error iniciando la VM (VirtualBox): {result.stderr.strip()}"
+                )
         else:
             # Comportamiento original Libvirt (virsh)
             if "Domain is already active" in result.stderr:
@@ -54,7 +61,9 @@ def start_vm(vm_name: str) -> dict:
                     "message": f"La máquina '{vm_name}' ya estaba encendida.",
                 }
             elif result.returncode != 0:
-                raise RuntimeError(f"Error iniciando la VM (Libvirt): {result.stderr.strip()}")
+                raise RuntimeError(
+                    f"Error iniciando la VM (Libvirt): {result.stderr.strip()}"
+                )
 
         return {
             "status": "success",

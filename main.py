@@ -6,16 +6,14 @@ import subprocess
 from config.settings import VM_NAME, SNAPSHOT
 from Infraestructura.vm_manager import restore_snapshot, start_vm
 from Agentes.Red.hacker_agent import ejecutar_ataque
-from Agentes.Blue.soc_agent import (
-    capturar_trafico,
-    analizar_logs_llm,
-    calcular_cvss,
-    clasificar,
-)
+from Agentes.Blue.soc_agent import capturar_trafico, analizar_logs_llm
+from Agentes.Blue.cvss import calcular_cvss, clasificar
 
 
 def accion_hacker_en_segundo_plano(modo="normal"):
-    print(f"[Red Team] Hacker preparado (Modo: {modo}). Lanzando ataque en 2 segundos...")
+    print(
+        f"[Red Team] Hacker preparado (Modo: {modo}). Lanzando ataque en 2 segundos..."
+    )
     time.sleep(2)
 
     resultado = ejecutar_ataque(modo=modo)
@@ -52,14 +50,16 @@ def simular_ciberataque(modo_ataque="normal"):
         print("\n[>>>] FASE 2: Ejecución del Ataque y Monitoreo del SOC")
         print(f"[+] Iniciando SOC Manager...")
 
-        hilo_hacker = threading.Thread(target=accion_hacker_en_segundo_plano, args=(modo_ataque,))
+        hilo_hacker = threading.Thread(
+            target=accion_hacker_en_segundo_plano, args=(modo_ataque,)
+        )
         hilo_hacker.start()
 
         # Si el ataque es de vulnerabilidad suele tardar más, aumentamos el tiempo de escucha
         tiempo_escucha = 15 if modo_ataque == "normal" else 45
         print(f"[+] Blue Team: Escuchando tráfico por {tiempo_escucha} segundos...")
         resultado_captura = capturar_trafico(segundos=tiempo_escucha, modo=modo_ataque)
-        
+
         # Esperamos a que los hilos terminen
         hilo_hacker.join()
 
@@ -97,6 +97,7 @@ def simular_ciberataque(modo_ataque="normal"):
                 descripcion = vuln.get("description", "Sin descripción detallada.")
                 print("📝 Descripción detallada:")
                 import textwrap
+
                 for linea in textwrap.wrap(descripcion, width=70):
                     print(f"   {linea}")
                 print(f"⚠️  Gravedad (CVSS 3.1): {score} [{nivel}]")
@@ -151,10 +152,10 @@ def menu_interactivo():
             print("\n" + "=" * 60)
             print("🔴 INICIANDO ATAQUE MANUAL (RED TEAM BÁSICO)")
             print("=" * 60)
-            
+
             print("[*] Iniciando ataque. Por favor espera...")
             resultado = ejecutar_ataque(modo="normal")
-            
+
             if resultado["status"] == "success":
                 print(f"[✅] Ataque finalizado con éxito.\n")
                 print("Resultados del escaneo:")
@@ -167,10 +168,12 @@ def menu_interactivo():
             print("\n" + "=" * 60)
             print("🔴 INICIANDO ATAQUE MANUAL (EVALUACIÓN DE VULNERABILIDADES)")
             print("=" * 60)
-            
-            print("[*] Iniciando escaneo de vulnerabilidades con Nmap NSE. Por favor espera...")
+
+            print(
+                "[*] Iniciando escaneo de vulnerabilidades con Nmap NSE. Por favor espera..."
+            )
             resultado = ejecutar_ataque(modo="vuln")
-            
+
             if resultado["status"] == "success":
                 print(f"[✅] Escaneo finalizado con éxito.\n")
                 print("Resultados del análisis de vulnerabilidades:")

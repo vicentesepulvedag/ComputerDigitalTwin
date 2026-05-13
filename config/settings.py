@@ -16,7 +16,7 @@ IFACE = "virbr1"
 TARGET_PORTS = "139,445"
 
 # Filtro BPF para tcpdump/tshark enfocado solo en la VM para reducir ruido
-CAPTURE_FILTER = f"host {TARGET_IP}" 
+CAPTURE_FILTER = f"host {TARGET_IP}"
 
 # Configuración de IA (Compatible con Groq, DeepSeek, OpenRouter, OpenAI)
 LLM_API_KEY = os.getenv("LLM_API_KEY")

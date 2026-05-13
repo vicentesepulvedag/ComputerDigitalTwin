@@ -67,9 +67,9 @@ def filter_relevant_logs(logs: list, max_lines: int = 40) -> list:
 
     # Priorizar conexiones con datos reales (ignorar ACK/SYN vacíos si tenemos payloads)
     logs_con_datos = [log for log in logs_unicos if "length 0" not in log]
-    
+
     # IMPORTANTE: A veces los paquetes de Nmap no tienen payload de datos (length 0) pero
-    # sí son críticos (ej. SYN scans o ciertas banderas anómalas). 
+    # sí son críticos (ej. SYN scans o ciertas banderas anómalas).
     # Por tanto, no deberíamos descartarlos todos si resultan ser la mayoría del tráfico atacante.
     if len(logs_con_datos) > 10:
         seleccion = logs_con_datos
