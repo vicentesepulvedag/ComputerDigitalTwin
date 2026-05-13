@@ -16,3 +16,6 @@ venv/
 __pycache__/
 
 ISO/
+
+# Telemetría (capturas, logs extraídos, exfil)
+Telemetria/

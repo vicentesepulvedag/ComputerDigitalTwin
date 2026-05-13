@@ -54,6 +54,18 @@ def summarize_logs(logs: list) -> dict:
         for port in re.findall(r"\b\d{1,3}(?:\.\d{1,3}){3}\.(\d{1,5})\b", log):
             ports.add(port)
 
+    smb_port_445_count = sum(1 for p in dst_ports if p == "445")
+    smb_ports = sum(1 for p in dst_ports if p in ("139", "445"))
+    payload_sizes = []
+    for log in logs:
+        m = re.search(r"length (\d+)", log, re.IGNORECASE)
+        if m:
+            payload_sizes.append(int(m.group(1)))
+    payload_size_counts = {}
+    for s in payload_sizes:
+        payload_size_counts[s] = payload_size_counts.get(s, 0) + 1
+    repeated_sizes = {k: v for k, v in payload_size_counts.items() if v >= 3 and k > 0}
+
     indicadores = []
     if len(dst_ports) >= 5 and length_nonzero > 0:
         indicadores.append("multi_port_with_payload")
@@ -61,6 +73,14 @@ def summarize_logs(logs: list) -> dict:
         indicadores.append("stealth_flag_scan")
     if "syn" in flags_counts and len(dst_ports) >= 5:
         indicadores.append("syn_scan_pattern")
+    if smb_ports >= 3 and length_nonzero > 10:
+        indicadores.append("smb_heavy_traffic")
+    if smb_port_445_count >= 5 and len(repeated_sizes) >= 2:
+        indicadores.append("ms17_grooming")
+    if smb_ports >= 3 and any("P" in str(flag) for flag in flags_counts):
+        write_andx = sum(1 for s in payload_sizes if 18 <= s <= 168)
+        if write_andx >= 5:
+            indicadores.append("ms17_writeandx_pipe")
 
     return {
         "total_lines": len(logs),
@@ -77,6 +97,12 @@ def summarize_logs(logs: list) -> dict:
         "dst_ports": sorted(dst_ports)[:20],
         "ports": sorted(ports)[:20],
         "indicators": indicadores,
+        "smb_traffic": {
+            "port_445_packets": smb_port_445_count,
+            "total_smb_packets": smb_ports,
+            "write_like_ops": sum(1 for s in payload_sizes if 18 <= s <= 168),
+        },
+        "repeated_payload_sizes": dict(list(repeated_sizes.items())[:10]),
     }
 
 

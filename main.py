@@ -8,6 +8,7 @@ from Infraestructura.vm_manager import restore_snapshot, start_vm
 from Agentes.Red.hacker_agent import ejecutar_ataque
 from Agentes.Blue.soc_agent import capturar_trafico, analizar_logs_llm
 from Agentes.Blue.cvss import calcular_cvss, clasificar
+from Agentes.Red.Herramientas.ms17_010_extract import ejecutar_extraccion
 
 
 def accion_hacker_en_segundo_plano(modo="normal"):
@@ -56,7 +57,7 @@ def simular_ciberataque(modo_ataque="normal"):
         hilo_hacker.start()
 
         # Si el ataque es de vulnerabilidad suele tardar más, aumentamos el tiempo de escucha
-        tiempo_escucha = 15 if modo_ataque == "normal" else 45
+        tiempo_escucha = 15 if modo_ataque == "normal" else (60 if modo_ataque == "ms17-010-extract" else 45)
         print(f"[+] Blue Team: Escuchando tráfico por {tiempo_escucha} segundos...")
         resultado_captura = capturar_trafico(segundos=tiempo_escucha, modo=modo_ataque)
 
@@ -140,9 +141,12 @@ def menu_interactivo():
         print("  2. Iniciar Simulación Completa (Ataque con Evaluación CVEs + SOC)")
         print("  3. Iniciar solo Red Team (Manual Básico)")
         print("  4. Iniciar solo Red Team (Evaluación de Vulnerabilidades/CVEs)")
-        print("  5. Salir")
+        print("  5. Iniciar solo Red Team (MS17-010 Checker)")
+        print("  6. Iniciar solo Red Team (MS17-010 Extracción de Archivos)")
+        print("  7. Iniciar Simulación Completa (MS17-010 + SOC)")
+        print("  8. Salir")
 
-        opcion = input("\nElige una opción (1-5): ")
+        opcion = input("\nElige una opción (1-8): ")
 
         if opcion == "1":
             simular_ciberataque(modo_ataque="normal")
@@ -183,6 +187,23 @@ def menu_interactivo():
             else:
                 print(f"[❌] Error en el análisis: {resultado['message']}")
         elif opcion == "5":
+            print("\n" + "=" * 60)
+            print("🔴 INICIANDO MS17-010 CHECKER (ETERNALBLUE)")
+            print("=" * 60)
+            print("[*] Verificando si el target es vulnerable a MS17-010...")
+            resultado = ejecutar_ataque(modo="ms17-010")
+            if resultado["status"] == "success":
+                print(f"\n{resultado['data']}")
+            else:
+                print(f"[❌] Error: {resultado['message']}")
+        elif opcion == "6":
+            print("\n" + "=" * 60)
+            print("🔴 INICIANDO MS17-010 EXTRACCIÓN DE ARCHIVOS")
+            print("=" * 60)
+            ejecutar_extraccion()
+        elif opcion == "7":
+            simular_ciberataque(modo_ataque="ms17-010-extract")
+        elif opcion == "8":
             print("Saliendo del simulador...")
             sys.exit(0)
         else:
