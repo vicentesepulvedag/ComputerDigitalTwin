@@ -3,12 +3,14 @@ from struct import pack
 from Agentes.Red.Herramientas.mysmb import MYSMB
 
 
-def check_vulnerability(target_ip: str, port: int = 445) -> dict:
+def check_vulnerability(
+    target_ip: str, port: int = 445, username: str = "", password: str = ""
+) -> dict:
     TRANS_PEEK_NMPIPE = 0x23
 
     conn = MYSMB(target_ip, port)
     try:
-        conn.login("", "")
+        conn.login(username, password)
     except Exception as e:
         return {
             "vulnerable": False,
@@ -33,7 +35,8 @@ def check_vulnerability(target_ip: str, port: int = 445) -> dict:
     status = recvPkt.getNTStatus()
     result["vulnerable"] = status == 0xC0000205
 
-    result["pipes"] = _find_pipes(conn) if result["vulnerable"] else []
+    if result["vulnerable"]:
+        result["pipes"] = _find_pipes(conn)
 
     conn.disconnect_tree(tid)
     conn.logoff()
@@ -43,11 +46,29 @@ def check_vulnerability(target_ip: str, port: int = 445) -> dict:
 
 def _find_pipes(conn) -> list:
     pipes = [
-        "netlogon", "lsarpc", "samr", "browser", "spoolss",
-        "atsvc", "DAV RPC SERVICE", "epmapper", "eventlog",
-        "InitShutdown", "keysvc", "lsass", "LSM_API_service",
-        "ntsvcs", "plugplay", "protected_storage", "router",
-        "scerpc", "srvsvc", "tapsrv", "trkwks", "W32TIME_ALT", "wkssvc",
+        "netlogon",
+        "lsarpc",
+        "samr",
+        "browser",
+        "spoolss",
+        "atsvc",
+        "DAV RPC SERVICE",
+        "epmapper",
+        "eventlog",
+        "InitShutdown",
+        "keysvc",
+        "lsass",
+        "LSM_API_service",
+        "ntsvcs",
+        "plugplay",
+        "protected_storage",
+        "router",
+        "scerpc",
+        "srvsvc",
+        "tapsrv",
+        "trkwks",
+        "W32TIME_ALT",
+        "wkssvc",
     ]
     tid = conn.tree_connect_andx("\\\\" + conn.get_remote_host() + "\\" + "IPC$")
     found = []

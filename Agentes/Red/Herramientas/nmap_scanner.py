@@ -4,10 +4,22 @@ import subprocess
 def run_nmap_scan(subnet: str, ports: str) -> dict:
     """Ejecuta un escaneo Nmap básico en la subred/IP especificada."""
     nmap_command = [
-        "sudo", "nmap",
-        "-Pn", "-sT", "-f", "-g", "53",
-        "-T5", "--data-length", "24", "--spoof-mac", "0",
-        "-p", ports, "--open", subnet,
+        "sudo",
+        "nmap",
+        "-Pn",
+        "-sT",
+        "-f",
+        "-g",
+        "53",
+        "-T5",
+        "--data-length",
+        "24",
+        "--spoof-mac",
+        "0",
+        "-p",
+        ports,
+        "--open",
+        subnet,
     ]
 
     try:

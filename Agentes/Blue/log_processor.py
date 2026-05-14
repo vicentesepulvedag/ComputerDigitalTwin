@@ -17,6 +17,8 @@ def summarize_logs(logs: list) -> dict:
     dst_ports = set()
     src_ips = set()
     dst_ips = set()
+    timestamps = []
+    smb_timestamps = []
 
     for log in logs:
         match = re.search(r"flags \[([^\]]+)\]", log, re.IGNORECASE)
@@ -51,6 +53,13 @@ def summarize_logs(logs: list) -> dict:
             ports.add(src_port)
             ports.add(dst_port)
 
+        # Parse timestamp for burst analysis
+        ts = re.match(r"(\d+:\d+:\d+\.\d+)", log)
+        if ts:
+            timestamps.append(ts.group(1))
+            if ":445" in log or ".445 " in log:
+                smb_timestamps.append(ts.group(1))
+
         for port in re.findall(r"\b\d{1,3}(?:\.\d{1,3}){3}\.(\d{1,5})\b", log):
             ports.add(port)
 
@@ -82,6 +91,32 @@ def summarize_logs(logs: list) -> dict:
         if write_andx >= 5:
             indicadores.append("ms17_writeandx_pipe")
 
+    from datetime import datetime
+
+    def _ts_to_sec(ts):
+        try:
+            parts = ts.split(":")
+            h, m, s = int(parts[0]), int(parts[1]), float(parts[2])
+            return h * 3600 + m * 60 + s
+        except (IndexError, ValueError):
+            return None
+
+    burst_info = {}
+    if len(smb_timestamps) >= 3:
+        smb_secs = [t for t in (_ts_to_sec(t) for t in smb_timestamps) if t is not None]
+        if len(smb_secs) >= 3:
+            span = smb_secs[-1] - smb_secs[0]
+            gaps = [smb_secs[i + 1] - smb_secs[i] for i in range(len(smb_secs) - 1)]
+            max_gap = max(gaps)
+            min_gap = min(gaps)
+            burst_info = {
+                "smb_total_seconds": round(span, 2),
+                "smb_packet_count": len(smb_secs),
+                "smb_packets_per_second": round(len(smb_secs) / max(span, 0.01), 1),
+                "min_gap_seconds": round(min_gap, 4),
+                "max_gap_seconds": round(max_gap, 2),
+            }
+
     return {
         "total_lines": len(logs),
         "flags": flags_counts,
@@ -97,6 +132,7 @@ def summarize_logs(logs: list) -> dict:
         "dst_ports": sorted(dst_ports)[:20],
         "ports": sorted(ports)[:20],
         "indicators": indicadores,
+        "burst": burst_info,
         "smb_traffic": {
             "port_445_packets": smb_port_445_count,
             "total_smb_packets": smb_ports,
@@ -108,15 +144,45 @@ def summarize_logs(logs: list) -> dict:
 
 def parse_llm_json(content: str) -> dict:
     text = content.strip()
-    if text.startswith("```"):
-        text = re.sub(r"^```(?:json)?", "", text).strip()
-        if text.endswith("```"):
-            text = text[: -len("```")].strip()
 
+    # Stripear bloques markdown ```json ... ``` y ``` ... ``` de cualquier posición
+    text = re.sub(r"(?s)^.*?```(?:json)?\s*\n?", "", text, count=1)
+    text = re.sub(r"(?s)```.*$", "", text, count=1)
+    text = text.strip()
+
+    # Stripear cualquier texto antes del primer { o después del último }
+    first_brace = text.find("{")
+    last_brace = text.rfind("}")
+    if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+        text = text[first_brace : last_brace + 1]
+
+    # Intentar parse directo
     try:
         return json.loads(text)
     except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", text, re.DOTALL)
-        if match:
-            return json.loads(match.group(0))
-        raise
+        pass
+
+    # Buscar { } al nivel más externo
+    brace_depth = 0
+    start = -1
+    for i, c in enumerate(text):
+        if c == "{":
+            if brace_depth == 0:
+                start = i
+            brace_depth += 1
+        elif c == "}":
+            brace_depth -= 1
+            if brace_depth == 0 and start != -1:
+                candidate = text[start : i + 1]
+                try:
+                    return json.loads(candidate)
+                except json.JSONDecodeError:
+                    # Intentar limpiar trailing commas
+                    cleaned = re.sub(r",\s*}", "}", candidate)
+                    cleaned = re.sub(r",\s*]", "]", cleaned)
+                    try:
+                        return json.loads(cleaned)
+                    except json.JSONDecodeError:
+                        pass
+
+    raise ValueError("No se pudo extraer JSON valido del texto recibido")

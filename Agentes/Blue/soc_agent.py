@@ -7,7 +7,7 @@ sys.path.append(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 )
 
-from config.settings import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, IFACE, TARGET_PORTS
+import config.settings
 from Infraestructura.network import run_tcpdump_capture
 from Infraestructura.log_parser import filter_relevant_logs
 from Agentes.Blue.log_processor import (
@@ -16,12 +16,18 @@ from Agentes.Blue.log_processor import (
     parse_llm_json,
 )
 
-if not LLM_API_KEY:
+if not config.settings.LLM_API_KEY:
     raise ValueError(
         "Por favor, configura la variable de entorno LLM_API_KEY (Asegúrate de crear un archivo '.env' en la raíz con la llave)."
     )
 
-client = OpenAI(api_key=LLM_API_KEY, base_url=LLM_BASE_URL)
+client = OpenAI(
+    api_key=config.settings.LLM_API_KEY, base_url=config.settings.LLM_BASE_URL
+)
+client_pro = OpenAI(
+    api_key=config.settings.LLM_BETTER_API_KEY,
+    base_url=config.settings.LLM_BETTER_BASE_URL,
+)
 
 
 def capturar_trafico(segundos: int = 15, modo: str = "normal") -> dict:
@@ -29,15 +35,133 @@ def capturar_trafico(segundos: int = 15, modo: str = "normal") -> dict:
         include_payload = modo in ("vuln", "ms17-010-extract")
         extra_verbose = modo in ("vuln", "ms17-010-extract")
         res = run_tcpdump_capture(
-            interface=IFACE,
+            interface=config.settings.IFACE,
             timeout_sec=segundos,
-            ports=TARGET_PORTS,
+            ports=config.settings.TARGET_PORTS,
             include_payload=include_payload,
             extra_verbose=extra_verbose,
         )
         return res
     except Exception as e:
         return {"status": "error", "message": str(e), "logs": []}
+
+
+def _detect_vulnerabilities(logs_texto, resumen_trafico, exfil_context=None):
+    exfil_section = ""
+    if exfil_context:
+        exfil_section = f"""
+EVIDENCIA DE EXFILTRACIÓN - Los siguientes archivos de usuario fueron descargados desde el objetivo:
+{chr(10).join('  - ' + f for f in exfil_context)}
+Si ves esto combinado con tráfico SMB a C$ en los logs, es EXFILTRACIÓN DE DATOS confirmada.
+Clasifícalo como severidad CRÍTICA, tipo "Exfiltración de Datos Post-Explotación SMB".
+"""
+
+    prompt = f"""
+Eres un analista experto de un SOC. Analiza los siguientes logs de tcpdump.
+Sistema operativo objetivo: {config.settings.OS_CHOICE}
+Resumen del tráfico:
+{json.dumps(resumen_trafico, ensure_ascii=True)}
+{exfil_section}
+Logs:
+{logs_texto}
+
+Clasifica la actividad en UNA de estas categorías (o ninguna):
+
+1) ESCANEO BÁSICO (Nmap SYN) — Paquetes SYN aislados sin payload, a múltiples puertos, sin continuación. Severidad BAJA.
+
+2) ESCANEO DE VULNERABILIDADES (Nmap NSE) — Conexiones ordenadas y espaciadas a puertos SMB (139, 445). Cada comando SMB tiene request+response antes del siguiente. Accede a varios named pipes (browser, samr, srvsvc, spoolss) en secuencia. Tamaños de paquete variados. Puede enviar payloads SMB específicos para testear versiones NO es explotación activa, es RECONOCIMIENTO. Severidad MEDIA.
+
+3) EXPLOTACIÓN MS17-010 ETERNALBLUE REAL — CRITERIOS ESTRICTOS (debe cumplir VARIOS):
+   - Ráfaga de paquetes en < 1 segundo (grooming: 4-8 paquetes de TAMAÑO IDÉNTICO, ej. varios de 102 bytes seguidos)
+   - Paquetes SMB Transaction Secondary con payloads grandes (>1000 bytes) o fragmentados en segmentos de ~1448 bytes
+   - Múltiples operaciones WriteAndX raw pipe simultáneas (sin esperar respuesta entre ellas)
+   - Secuencia de paquetes con tamaños repetitivos exactos: 102, 110, 118, 126 (grooming) seguido de WriteAndX grande
+   - Tráfico sostenido en ráfaga densa (< 0.1s entre paquetes)
+   SI el tráfico es ESPACIADO, ORDENADO, con pausas entre conexiones → es NSE, NO EternalBlue.
+   Severidad CRÍTICA solo si hay EVIDENCIA CLARA de los patrones densos de grooming + write.
+
+4) POST-EXPLOTACIÓN / EXFILTRACIÓN SMB — Acceso a C$ + descarga de archivos de usuario (index.dat, desktop.ini, cookies). Severidad CRÍTICA.
+
+Guía para NO confundir Nmap NSE con EternalBlue:
+- NSE: conexiones espaciadas (>0.5s entre grupos), tamaños variados, named pipes en orden
+- EternalBlue: ráfaga densa (<0.1s entre paquetes), tamaños duplicados exactos, transacciones solapadas
+- Si los logs muestran "flags [S]" (SYN) → es inicio de conexión Nmap, no exploit activo
+- Si el tiempo entre paquetes es >1s → probablemente NSE, no exploit
+- Nmap NSE suele tardar 10-45 segundos. EternalBlue completa la explotación en 1-3 segundos.
+
+Responde SOLO en JSON:
+{{"vulnerabilities": [{{"type": "str", "description": "str detallada", "CVSS_metrics": {{"AV": float, "AC": float, "PR": float, "UI": float, "C": float, "I": float, "A": float}}}}]}}
+Para MS17-010 real: AV=NETWORK(0.85), AC=LOW(0.77), PR=NONE(0.85), UI=NONE(0.85), C=HIGH(0.56), I=HIGH(0.56), A=HIGH(0.56).
+Para escaneo NSE: AV=NETWORK(0.85), AC=LOW(0.77), PR=NONE(0.85), UI=NONE(0.85), C=LOW(0.22), I=LOW(0.22), A=NONE(0.00).
+Para exfiltración: AV=NETWORK(0.85), AC=LOW(0.77), PR=LOW(0.62), UI=NONE(0.85), C=HIGH(0.56), I=LOW(0.22), A=NONE(0.00).
+{{"vulnerabilities": []}} si no hay actividad ofensiva clara.
+"""
+    try:
+        response = client.chat.completions.create(
+            model=config.settings.LLM_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1,
+        )
+        content = response.choices[0].message.content.strip()
+        result = parse_llm_json(content)
+        if not isinstance(result, dict):
+            return {"vulnerabilities": []}
+        if "vulnerabilities" not in result:
+            result["vulnerabilities"] = []
+        elif not isinstance(result["vulnerabilities"], list):
+            result["vulnerabilities"] = [result["vulnerabilities"]]
+        return result
+    except Exception as e:
+        return {"vulnerabilities": [], "error": f"Detection error: {str(e)}"}
+
+
+def _generate_recommendations(vulnerabilities):
+    if not vulnerabilities:
+        return vulnerabilities
+
+    vuln = vulnerabilities[0]
+    vuln_type = vuln.get("type", "Desconocida")
+    vuln_desc = vuln.get("description", "")[:500]
+
+    prompt = f"""
+Eres un ingeniero senior de ciberseguridad. Respuesta SOLO en JSON, sin texto adicional.
+
+Amenaza detectada en {config.settings.OS_CHOICE}:
+Tipo: {vuln_type}
+Descripción: {vuln_desc}
+
+Genera:
+1) "explanation": texto explicativo detallado (qué es, cómo funciona, impacto, por qué es crítica)
+2) "recommendations": lista de strings. Cada string debe tener este formato exacto:
+   "[Alta] Descripción de qué hace, dónde ejecutarlo (CMD/PowerShell) y por qué:\\ncomando exacto\\nNota post-ejecución (opcional)"
+
+Ejemplo de recommendation:
+"[Alta] Deshabilitar SMBv1 en CMD como administrador:\\ndism /online /disable-feature /featurename:SMB1Protocol\\nReiniciar el sistema después de ejecutar."
+
+JSON válido (sin markdown, sin texto extra):
+{{"explanation": "...texto...", "recommendations": ["[Alta] Descripción:\\ncomando", "[Media] Descripción:\\ncomando"]}}
+"""
+    try:
+        response = client_pro.chat.completions.create(
+            model=config.settings.LLM_BETTER_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1,
+        )
+        content = response.choices[0].message.content.strip()
+        result = parse_llm_json(content)
+        recs = result.get("recommendations", []) if isinstance(result, dict) else []
+        explanation = result.get("explanation", "") if isinstance(result, dict) else ""
+        for vuln in vulnerabilities:
+            vuln["recommendations"] = recs
+            vuln["explanation"] = explanation
+        return vulnerabilities
+    except Exception as e:
+        for vuln in vulnerabilities:
+            vuln["recommendations"] = [
+                f"[Alta] Revisar manualmente: error generando recomendaciones - {str(e)}"
+            ]
+            vuln["explanation"] = "No se pudo generar la explicación."
+        return vulnerabilities
 
 
 def analizar_logs_llm(logs: list) -> dict:
@@ -50,70 +174,31 @@ def analizar_logs_llm(logs: list) -> dict:
         print(f"  > {l}")
     print(f"  > ... ({len(logs_limpios)} líneas en total)")
 
+    exfil_context = None
+    manifest = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "Telemetria",
+        "exfil",
+        ".exfil_manifest.txt",
+    )
+    if os.path.exists(manifest):
+        with open(manifest) as f:
+            lines = [l.strip() for l in f if l.strip()]
+            if lines:
+                exfil_context = lines
+                print(f"[*] Evidencia de exfiltración: {len(lines)} archivos extraídos")
+
     logs_texto = format_logs_for_prompt(logs_limpios)
     resumen_trafico = summarize_logs(logs_limpios)
 
-    prompt = f"""
-Eres un analista experto de un SOC (Centro de Operaciones de Seguridad). Analiza los siguientes logs de tcpdump capturados en el firewall (-v mode):
-Resumen derivado automáticamente (para contexto):
-{json.dumps(resumen_trafico, ensure_ascii=True)}
+    print("[*] Fase 1: Detectando vulnerabilidades...")
+    detection = _detect_vulnerabilities(logs_texto, resumen_trafico, exfil_context)
 
-Logs en orden de captura:
-{logs_texto}
-    
-Tu objetivo es detectar CUALQUIER tipo de actividad ofensiva. INCLUSO los escaneos básicos de Nmap DEBEN ser reportados como una amenaza.
+    if not detection.get("vulnerabilities"):
+        return detection
 
-Diferencia claramente entre:
-1) Escaneos básicos de puertos (ej. Nmap detectando disponibilidad mediante paquetes SYN que no pasan datos). Clasifícalo como amenaza de severidad baja/media.
-2) Intentos de explotación o escaneo avanzado de vulnerabilidades (ej. Nmap NSE scripts, enviando datos adicionales y payloads hacia puertos específicos). Clasifícalo como severidad alta/crítica.
-3) Explotación activa de MS17-010 (EternalBlue). Identifícala por estos patrones:
-   - Múltiples conexiones SMB al puerto 445 con acceso a named pipes IPC$ (spoolss, samr, browser, lsarpc, srvsvc)
-   - Comandos SMB WriteAndX con "raw pipe" mode (modo escritura directa a named pipe)
-   - Secuencias de paquetes SMB Transaction/NT Transaction de tamaños similares (grooming de pool de memoria)
-   - Múltiples SMB Transaction Secondary packets modificando el mismo transaction ID (manipulación de structuras)
-   - Tráfico SMB post-explotación con Service Control Manager (svcctl) RPC para crear/eliminar servicios
-   - SMB session setup y tree connect a IPC$ repetidos en corto tiempo
-   CUALQUIER combinación de WriteAndX raw pipe + named pipe + múltiples transactions secundarias ES UN EXPLOIT EN EJECUCIÓN, clasifícalo como CRITICAL.
-4) Post-explotación / exfiltración de datos vía SMB. Identifícala por estos patrones:
-   - Tráfico SMB hacia el recurso compartido C$ (TreeConnect a C$) inmediatamente después de la explotación
-   - Acceso a rutas de perfil de usuario: "Documents and Settings\\*\\Cookies\\", "Local Settings\\History\\", "Desktop\\"
-   - Descarga de archivos específicos del usuario: index.dat, desktop.ini, documentos del escritorio
-   - Múltiples peticiones SMB ReadAndX para archivos de usuario (indican exfiltración activa)
-   - Conexiones SMB persistentes con session setup + tree connect a C$ para navegar el sistema de archivos
-   - Listado de directorios (SMB TRANS2_FIND_FIRST2/NEXT2) sobre "Documents and Settings\\" para enumerar usuarios del sistema
-   CUALQUIER acceso a archivos de usuario vía C$ tras un exploit SMB ES EXFILTRACIÓN, clasifícalo como CRITICAL.
-
-Guia adicional:
-- Si hay payloads no vacios hacia multiples puertos o indicadores "multi_port_with_payload", considera el evento como escaneo avanzado.
-- Si ves trafico sostenido hacia SMB/NetBIOS (puertos 139/445) con payloads, considera riesgo alto.
-- Si ves indicadores "ms17_grooming" o "ms17_writeandx_pipe" en el resumen, es evidencia contundente de MS17-010 exploitation.
-- Si hay acceso a named pipes (spoolss, samr, browser, srvsvc) seguido de tráfico SMB denso, es explotación activa.
-- Si ves acceso a C$ share + descarga de archivos de usuario (index.dat, Cookies, Desktop), es exfiltración post-explotación.
-
-Responde SOLO en formato JSON estricto indicando:
-- "vulnerabilities": Lista de anomalías o ataques detectados. Siempre que haya un escaneo o ataque, esta lista DEBE contener al menos un elemento.
-Dentro de cada elemento de "vulnerabilities":
-- "type": Nombre de la amenaza (ej. "Escaneo de Reconocimiento Nmap", "Evaluación Agresiva de Vulnerabilidades", "Explotación MS17-010 EternalBlue", "Exfiltración de Datos Post-Explotación SMB").
-- "description": Explicación muy detallada justificando en base a tamaño de paquetes, puertos y banderas por qué se le asigna esta clasificación.
-- "CVSS_metrics": Diccionario con las llaves "AV", "AC", "PR", "UI", "C", "I", "A" usando sus valores numéricos (float). Para MS17-010 usa AV=NETWORK(0.85), AC=LOW(0.77), PR=NONE(0.85), UI=NONE(0.85), C=HIGH(0.56), I=HIGH(0.56), A=HIGH(0.56). Para exfiltración post-explotación usa AV=NETWORK(0.85), AC=LOW(0.77), PR=LOW(0.62), UI=NONE(0.85), C=HIGH(0.56), I=LOW(0.22), A=NONE(0.00).
-- "recommendations": Lista de recomendaciones técnicas para mitigar el ataque. Para MS17-010 incluir: parchear SMB (MS17-010), deshabilitar SMBv1, segmentar red, aislar el host comprometido. Para exfiltración incluir: rotar credenciales, auditar accesos SMB, monitorizar accesos anómalos a C$.
-
-Solo devuelve {{"vulnerabilities": []}} si NO hay absolutamente NINGÚN paquete relacionado a Nmap, intentos de conexión, named pipes o tráfico inusual.
-"""
-    try:
-        response = client.chat.completions.create(
-            model=LLM_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.1,
-        )
-        content = response.choices[0].message.content.strip()
-        parsed = parse_llm_json(content)
-        if not isinstance(parsed, dict):
-            return {"vulnerabilities": []}
-        if "vulnerabilities" not in parsed:
-            parsed["vulnerabilities"] = []
-        elif not isinstance(parsed["vulnerabilities"], list):
-            parsed["vulnerabilities"] = [parsed["vulnerabilities"]]
-        return parsed
-    except Exception as e:
-        return {"vulnerabilities": [], "error": f"Error procesando LLM: {str(e)}"}
+    print(f"[*] Fase 2: Generando recomendaciones detalladas...")
+    detection["vulnerabilities"] = _generate_recommendations(
+        detection["vulnerabilities"]
+    )
+    return detection

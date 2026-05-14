@@ -19,3 +19,6 @@ ISO/
 
 # Telemetría (capturas, logs extraídos, exfil)
 Telemetria/
+
+# Marcadores de setup
+.cdt_setup_done
