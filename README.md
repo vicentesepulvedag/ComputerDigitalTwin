@@ -1,68 +1,105 @@
-# 👑 Computer Digital Twin (Red vs Blue Simulator)
+# Computer Digital Twin (Red vs Blue Simulator)
 
-Este proyecto es un simulador de ciberseguridad automatizado diseñado para ejecutar y monitorear ciberataques en entornos controlados mediante la orquestación de Máquinas Virtuales. 
+Simulador de ciberseguridad automatizado que orquesta ataques Red Team y defensa Blue Team en entornos de máquinas virtuales, con análisis forense por IA.
 
-El sistema enfrenta a dos agentes automatizados:
-* **🔴 Red Team (Hacker Agent):** Se encarga de atacar la infraestructura vulnerable usando herramientas como Nmap.
-* **🔵 Blue Team (SOC Manager con IA):** Captura y analiza el tráfico de red (`tcpdump`) y delega la revisión de alertas y logs a la Inteligencia artificial de Modelos de Lenguaje (OpenAI o Google Gemini) para reaccionar o reportar anomalías en tiempo real.
+## Arquitectura
 
-## 📋 Requisitos Previos
-
-1. **Sistema Operativo:** Se recomienda **Linux**. Si usas Windows, es altamente recomendable utilizar **WSL 2 (Ubuntu u otra distribución)** debido a las dependencias de red subyacentes.
-2. **Python 3.10+** (o superior).
-3. **Herramientas de red del sistema:** Debes tener instalados `nmap` y `tcpdump` en tu sistema operativo, ya que los scripts de Python los invocan por detrás.
-4. Una herramienta de virtualización compatible con la lógica del proyecto (Virtual Machine Manager/Libvirt o VirtualBox).
-
-## 🖥️ Configuración de la Máquina Virtual (Target)
-
-Para que el orquestador pueda interactuar con la infraestructura y automatizar los ataques, es **estrictamente necesario** preparar la máquina virtual vulnerable siguiendo estos pasos:
-
-1. **Crear la Máquina Virtual:** En tu administrador de VMs (Virtual Machine Manager o VirtualBox), crea una nueva máquina y nómbrala **EXACTAMENTE**:
-   * `XP_Testing_1`
-2. **Descargar e Instalar la ISO:** Puedes descargar la ISO de Windows XP SP3 VL (x86) de Massgrave en el siguiente enlace: [Descargar ISO](https://buzzheavier.com/nar2zwokpo9t). Una vez descargada, colócala en la carpeta `ISO/` (está ignorada en git por su tamaño) y realiza una instalación estándar en tu máquina virtual (esto emulará un sistema legado vulnerable).
-3. **Configuración Inicial:** Una vez instalado, asegúrate de que el equipo inicie correctamente y tenga conectividad de red con tu sistema base. (Windows XP suele tener abiertos los puertos 139 y 445 por defecto en configuraciones de red, lo cual es ideal para que Nmap los detecte).
-4. **Tomar el Snapshot Base:** Conducida la configuración inicial, crea un **Snapshot (Captura o Instantánea)** de la máquina virtual. Debes nombrarlo **EXACTAMENTE** de la siguiente manera:
-   * `XP_Ready_Hack`
-
-*Nota: El orquestador de Python buscará específicamente esta VM (`XP_Testing_1`) y revertirá a este snapshot (`XP_Ready_Hack`) cada vez que inicies una nueva simulación, garantizando que el entorno vuelva a ser limpio y vulnerable.*
-
-## 🚀 Instalación y Configuración
-
-**1. Clonar el repositorio y situarse en la carpeta**
-```bash
-git clone <url-del-repositorio>
-cd ComputerDigitalTwin
+```
+main.py                     → Entry point (3 líneas)
+cli/
+  menu.py                   → Menú interactivo con rich
+  display.py                → Paneles, tablas, colores, syntax highlighting
+orchestrator/
+  actions.py                → Lógica de simulación (sin prints)
+  registry.py               → Registro de comandos (patrón dispatcher)
+Agentes/
+  Red/hacker_agent.py       → Orquestador de ataques (nmap, MS17-010)
+  Blue/soc_agent.py         → Captura tcpdump + análisis con LLM
+Infraestructura/
+  network.py                → Captura de tráfico con tcpdump
+  vm_manager.py             → Control de VMs (libvirt/virtualbox)
+config/
+  settings.py               → Configuración multi-SO y LLM
 ```
 
-**2. Crear y activar el entorno virtual**
+## Requisitos
+
+- Linux (o WSL2 en Windows)
+- Python 3.10+
+- `nmap`, `tcpdump` instalados en el sistema
+- Libvirt (recomendado) o VirtualBox
+- Máquinas virtuales configuradas
+
+## Sistemas operativos soportados
+
+| SO          | VM           | Snapshot        | IP             |
+|-------------|-------------|-----------------|----------------|
+| Windows XP  | XP_Testing_1 | XP_Not_Firewall | 192.168.100.10 |
+| Windows 7   | Win7_Testing  | Win7_FirewallOFF| 192.168.100.9  |
+| Windows 10  | Win10_Testing | Win10_Clean     | 192.168.100.12 |
+
+## Instalación
+
 ```bash
+git clone <repo> && cd ComputerDigitalTwin
 python -m venv .venv
 source .venv/bin/activate
-```
-*(Nota para usuarios de Windows WSL: Asegúrate de estar dentro del entorno Linux para que se generen las carpetas estilo bash).*
-
-**3. Instalar las dependencias de Python**
-```bash
 pip install -r requerimientos.txt
 ```
 
-**4. Configurar las Variables de Entorno (IA y Virtualización)**
-Debes crear un archivo llamado `.env` en la raíz del proyecto. Este archivo proveerá las credenciales para la IA del SOC y permitirá elegir tu proveedor de máquinas virtuales (Libvirt o VirtualBox).
-Ejemplo de `/.env`:
+## Configuración
+
+Crear `.env` en la raíz:
+
 ```env
-LLM_API_KEY="tu-clave-secreta-de-openai-o-gemini"
+# Obligatorio — clave del LLM (DeepSeek por defecto)
+LLM_API_KEY="sk-tu-key"
+
+# Opcional — modelo premium para recomendaciones
+LLM_BETTER_API_KEY="sk-tu-key-pro"
+LLM_BETTER_MODEL="deepseek-v4-pro"
 
 # Opciones: "libvirt" (por defecto) o "virtualbox"
-VM_PROVIDER="virtualbox"
+VM_PROVIDER="libvirt"
 ```
-*(Nota para usuarios de Windows/WSL: VirtualBox es el proveedor recomendado, solo asegúrate de tener `VBoxManage` accesible desde la línea de comandos).*
 
-## 🎮 Ejecución
+## Ejecución
 
-Una vez que todo está instalado y configurado correctamente, arranca el orquestador principal:
+**Opción recomendada** (sudo temporario, seguro):
 
 ```bash
+./cdt.sh
+```
+
+Pide contraseña una vez, la mantiene en caché mientras corre el programa, y al salir restaura todo.
+
+**Opción directa** (si ya tienes sudoers configurado):
+
+```bash
+source .venv/bin/activate
 python main.py
 ```
 
-Esto desplegará un menú interactivo en tu terminal desde el cual podrás iniciar la simulación completa o lanzar al Red Team de forma manual.
+## Flujo del programa
+
+1. **Selección de SO** — eliges qué máquina virtual atacar
+2. **Menú de acciones**:
+   - Restaurar VM a snapshot limpio
+   - Ataques Red Team individuales (básico, CVEs, MS17-010 checker, MS17-010 extracción)
+   - Simulaciones completas (Red + Blue con análisis IA)
+   - Volver a seleccionar SO o salir
+
+## Modelos de IA
+
+| Uso                     | Modelo por defecto      | Variable              |
+|-------------------------|------------------------|-----------------------|
+| Detección de amenazas   | `deepseek-v4-flash`    | `LLM_MODEL`           |
+| Recomendaciones         | `deepseek-v4-pro`      | `LLM_BETTER_MODEL`    |
+
+Compatible con OpenAI, Groq, OpenRouter y cualquier API compatible.
+
+## Personalización
+
+Agregar un nuevo SO: edita `OS_CONFIGS` en `config/settings.py` con el nombre de VM, snapshot e IP. El menú lo detecta automáticamente.
+
+Agregar una nueva acción al menú: regístrala con `register("clave", handler_fn, "descripción")` en `cli/menu.py`.
