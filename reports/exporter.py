@@ -15,12 +15,7 @@ Formato PDF del reporte:
 from pathlib import Path
 from datetime import datetime
 
-from reportlab.platypus import (
-    SimpleDocTemplate,
-    Paragraph,
-    Spacer,
-    Preformatted
-)
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Preformatted
 
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.pagesizes import letter
@@ -38,19 +33,13 @@ class PDFExporter:
 
         filename = output_dir / f"incident_report_{timestamp}.pdf"
 
-        doc = SimpleDocTemplate(
-            str(filename),
-            pagesize=letter
-        )
+        doc = SimpleDocTemplate(str(filename), pagesize=letter)
 
         styles = getSampleStyleSheet()
 
         elements = []
 
-        title = Paragraph(
-            "Reporte de Incidente",
-            styles["Title"]
-        )
+        title = Paragraph("Reporte de Incidente", styles["Title"])
 
         elements.append(title)
         elements.append(Spacer(1, 20))
@@ -61,49 +50,30 @@ class PDFExporter:
         <b>CVSS:</b> {report_data.get("cvss", "N/A")}<br/>
         """
 
+        elements.append(Paragraph(summary, styles["BodyText"]))
+
+        elements.append(Spacer(1, 15))
+
+        elements.append(Paragraph("<b>Descripción</b>", styles["Heading2"]))
+
         elements.append(
-            Paragraph(summary, styles["BodyText"])
+            Paragraph(report_data.get("description", ""), styles["BodyText"])
         )
 
         elements.append(Spacer(1, 15))
 
         elements.append(
-            Paragraph(
-                "<b>Descripción</b>",
-                styles["Heading2"]
-            )
+            Paragraph("<b>Explicación de la Vulnerabilidad</b>", styles["Heading2"])
         )
 
         elements.append(
-            Paragraph(
-                report_data.get("description", ""),
-                styles["BodyText"]
-            )
+            Paragraph(report_data.get("technical_explanation", ""), styles["BodyText"])
         )
 
         elements.append(Spacer(1, 15))
 
         elements.append(
-            Paragraph(
-                "<b>Explicación de la Vulnerabilidad</b>",
-                styles["Heading2"]
-            )
-        )
-
-        elements.append(
-            Paragraph(
-                report_data.get("technical_explanation", ""),
-                styles["BodyText"]
-            )
-        )
-
-        elements.append(Spacer(1, 15))
-
-        elements.append(
-            Paragraph(
-                "<b>Recomendaciones de Mitigación</b>",
-                styles["Heading2"]
-            )
+            Paragraph("<b>Recomendaciones de Mitigación</b>", styles["Heading2"])
         )
 
         mitigations = report_data.get("mitigations", [])
@@ -121,27 +91,15 @@ class PDFExporter:
             {mitigation.get("note", "")}
             """
 
-            elements.append(
-                Paragraph(text, styles["BodyText"])
-            )
+            elements.append(Paragraph(text, styles["BodyText"]))
 
             elements.append(Spacer(1, 12))
 
-        elements.append(
-            Paragraph(
-                "<b>Logs</b>",
-                styles["Heading2"]
-            )
-        )
+        elements.append(Paragraph("<b>Logs</b>", styles["Heading2"]))
 
         logs = report_data.get("logs", "")
 
-        elements.append(
-            Preformatted(
-                logs,
-                styles["Code"]
-            )
-        )
+        elements.append(Preformatted(logs, styles["Code"]))
 
         doc.build(elements)
 

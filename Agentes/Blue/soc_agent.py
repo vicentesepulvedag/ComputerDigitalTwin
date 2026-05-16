@@ -32,8 +32,8 @@ client_pro = OpenAI(
 
 def capturar_trafico(segundos: int = 15, modo: str = "normal") -> dict:
     try:
-        include_payload = modo in ("vuln", "ms17-010-extract")
-        extra_verbose = modo in ("vuln", "ms17-010-extract")
+        include_payload = modo in ("vuln", "ms17-010-no-exfil", "ms17-010-extract")
+        extra_verbose = modo in ("vuln", "ms17-010-no-exfil", "ms17-010-extract")
         res = run_tcpdump_capture(
             interface=config.settings.IFACE,
             timeout_sec=segundos,
@@ -53,7 +53,7 @@ def _detect_vulnerabilities(logs_texto, resumen_trafico, exfil_context=None):
 EVIDENCIA DE EXFILTRACIÓN - Los siguientes archivos de usuario fueron descargados desde el objetivo:
 {chr(10).join('  - ' + f for f in exfil_context)}
 Si ves esto combinado con tráfico SMB a C$ en los logs, es EXFILTRACIÓN DE DATOS confirmada.
-Clasifícalo como severidad CRÍTICA, tipo "Exfiltración de Datos Post-Explotación SMB".
+Clasifícalo como severidad CRÍTICA, Revisa los logs para poder evaluar el tipo de exfiltración de datos que se ha explotado.
 """
 
     prompt = f"""
@@ -69,31 +69,33 @@ Clasifica la actividad en UNA de estas categorías (o ninguna):
 
 1) ESCANEO BÁSICO (Nmap SYN) — Paquetes SYN aislados sin payload, a múltiples puertos, sin continuación. Severidad BAJA.
 
-2) ESCANEO DE VULNERABILIDADES (Nmap NSE) — Conexiones ordenadas y espaciadas a puertos SMB (139, 445). Cada comando SMB tiene request+response antes del siguiente. Accede a varios named pipes (browser, samr, srvsvc, spoolss) en secuencia. Tamaños de paquete variados. Puede enviar payloads SMB específicos para testear versiones NO es explotación activa, es RECONOCIMIENTO. Severidad MEDIA.
+2) ESCANEO DE VULNERABILIDADES (Nmap NSE) — Conexiones ordenadas y espaciadas a puertos SMB (139, 445). Cada comando SMB tiene request+response antes del siguiente. Accede a varios named pipes (browser, samr, srvsvc, spoolss) en secuencia. Tamaños de paquete variados. Severidad MEDIA.
 
-3) EXPLOTACIÓN MS17-010 ETERNALBLUE REAL — CRITERIOS ESTRICTOS (debe cumplir VARIOS):
+3) EXPLOTACIÓN MS17-010 ETERNALBLUE — CRITERIOS ESTRICTOS (debe cumplir VARIOS):
    - Ráfaga de paquetes en < 1 segundo (grooming: 4-8 paquetes de TAMAÑO IDÉNTICO, ej. varios de 102 bytes seguidos)
    - Paquetes SMB Transaction Secondary con payloads grandes (>1000 bytes) o fragmentados en segmentos de ~1448 bytes
    - Múltiples operaciones WriteAndX raw pipe simultáneas (sin esperar respuesta entre ellas)
    - Secuencia de paquetes con tamaños repetitivos exactos: 102, 110, 118, 126 (grooming) seguido de WriteAndX grande
    - Tráfico sostenido en ráfaga densa (< 0.1s entre paquetes)
+   SI hay grooming + write ANDEX pero NO hay acceso a C$ ni descarga de archivos de usuario → esto es EXPLOTACIÓN SIN EXFILTRACIÓN. Severidad ALTA.
    SI el tráfico es ESPACIADO, ORDENADO, con pausas entre conexiones → es NSE, NO EternalBlue.
-   Severidad CRÍTICA solo si hay EVIDENCIA CLARA de los patrones densos de grooming + write.
 
-4) POST-EXPLOTACIÓN / EXFILTRACIÓN SMB — Acceso a C$ + descarga de archivos de usuario (index.dat, desktop.ini, cookies). Severidad CRÍTICA.
+4) EXPLOTACIÓN MS17-010 ETERNALBLUE CON EXFILTRACIÓN — Ráfaga densa de grooming + write ANDEX + acceso a C$ + descarga de archivos de usuario (cookies, index.dat, desktop.ini, succes.txt). Severidad CRÍTICA.
+
+5) POST-EXPLOTACIÓN / EXFILTRACIÓN SMB (SIN EXPLOIT VISIBLE) — Acceso a C$ + descarga de archivos de usuario, pero SIN los patrones de grooming/WriteAndX de EternalBlue. Severidad CRÍTICA.
 
 Guía para NO confundir Nmap NSE con EternalBlue:
 - NSE: conexiones espaciadas (>0.5s entre grupos), tamaños variados, named pipes en orden
 - EternalBlue: ráfaga densa (<0.1s entre paquetes), tamaños duplicados exactos, transacciones solapadas
 - Si los logs muestran "flags [S]" (SYN) → es inicio de conexión Nmap, no exploit activo
 - Si el tiempo entre paquetes es >1s → probablemente NSE, no exploit
-- Nmap NSE suele tardar 10-45 segundos. EternalBlue completa la explotación en 1-3 segundos.
 
 Responde SOLO en JSON:
 {{"vulnerabilities": [{{"type": "str", "description": "str detallada", "CVSS_metrics": {{"AV": float, "AC": float, "PR": float, "UI": float, "C": float, "I": float, "A": float}}}}]}}
-Para MS17-010 real: AV=NETWORK(0.85), AC=LOW(0.77), PR=NONE(0.85), UI=NONE(0.85), C=HIGH(0.56), I=HIGH(0.56), A=HIGH(0.56).
+Para EternalBlue sin exfiltración (categoría 3): AV=NETWORK(0.85), AC=LOW(0.77), PR=NONE(0.85), UI=NONE(0.85), C=HIGH(0.56), I=HIGH(0.56), A=HIGH(0.56).
+Para EternalBlue con exfiltración (categoría 4) o exfiltración sola (categoría 5): AV=NETWORK(0.85), AC=LOW(0.77), PR=LOW(0.62), UI=NONE(0.85), C=HIGH(0.56), I=HIGH(0.56), A=HIGH(0.56).
 Para escaneo NSE: AV=NETWORK(0.85), AC=LOW(0.77), PR=NONE(0.85), UI=NONE(0.85), C=LOW(0.22), I=LOW(0.22), A=NONE(0.00).
-Para exfiltración: AV=NETWORK(0.85), AC=LOW(0.77), PR=LOW(0.62), UI=NONE(0.85), C=HIGH(0.56), I=LOW(0.22), A=NONE(0.00).
+Para escaneo básico: AV=NETWORK(0.85), AC=LOW(0.77), PR=NONE(0.85), UI=NONE(0.85), C=NONE(0.00), I=NONE(0.00), A=NONE(0.00).
 {{"vulnerabilities": []}} si no hay actividad ofensiva clara.
 """
     try:

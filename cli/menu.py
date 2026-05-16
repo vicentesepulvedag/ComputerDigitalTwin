@@ -34,8 +34,10 @@ def _simular(modo: str):
     nombre = "Simulación Completa"
     if modo == "vuln":
         nombre += " (Evaluación CVEs)"
+    elif modo == "ms17-010-no-exfil":
+        nombre += " (MS17-010 sin extracción)"
     elif modo == "ms17-010-extract":
-        nombre += " (MS17-010)"
+        nombre += " (MS17-010 con extracción)"
 
     banner(nombre)
 
@@ -44,10 +46,15 @@ def _simular(modo: str):
 
     separador("fase")
     sub_banner("Fase 1: Preparación de Infraestructura")
-    info(f"Restaurando snapshot de '{os_actual}'...")
+    info(f"Limpiando datos extraídos previos...")
 
-    with con_progreso("Restaurando y arrancando VM") as progress:
+    with con_progreso("Arrancando VM") as progress:
         progress.add_task("", total=None)
+
+    separador("fase")
+    sub_banner("Fase 2: Ataque y Defensa Simultáneos")
+    info(f"Red Team atacando '{os_actual}'...")
+    info("Blue Team monitoreando tráfico...")
 
     result = ejecutar_simulacion(modo, os_actual)
 
@@ -55,11 +62,6 @@ def _simular(modo: str):
         error(result.error_msg)
         separador("fin")
         return
-
-    separador("fase")
-    sub_banner("Fase 2: Ataque y Defensa Simultáneos")
-    info(f"Red Team atacando '{result.os_name}'...")
-    info("Blue Team monitoreando tráfico...")
 
     separador("fase")
     sub_banner("Fase 3: Análisis Forense (IA)")
@@ -75,6 +77,20 @@ def _simular(modo: str):
         result.cvss_nivel,
         result.os_name,
     )
+
+    if result.report_data:
+        from cli.export_menu import select_export_format
+
+        option = select_export_format()
+        if option in ("1", "3"):
+            from reports.exporter import PDFExporter
+
+            PDFExporter.export(result.report_data)
+        if option in ("2", "3"):
+            from reports.csv_exporter import CSVExporter
+
+            CSVExporter.export(result.report_data)
+
     separador("fin")
 
 
@@ -137,13 +153,15 @@ _pantalla_accion_items: list[tuple[str, str]] = [
     ("2", "Ataque Básico"),
     ("3", "Evaluación de Vulnerabilidades / CVEs"),
     ("4", "MS17-010 Checker (EternalBlue)"),
-    ("5", "MS17-010 Extracción de Archivos"),
+    ("5", "MS17-010 Exploit (sin extracción)"),
+    ("6", "MS17-010 Extracción de Archivos"),
     ("", "[bold]--- Simulaciones Completas (Red + Blue) ---[/]"),
-    ("6", "Ataque Básico + SOC"),
-    ("7", "Ataque con CVEs + SOC"),
-    ("8", "MS17-010 + SOC"),
+    ("7", "Ataque Básico + SOC"),
+    ("8", "Ataque con CVEs + SOC"),
+    ("9", "MS17-010 sin exfiltración + SOC"),
+    ("10", "MS17-010 con exfiltración + SOC"),
     ("", "[bold]--- ---[/]"),
-    ("9", "Volver (cambiar sistema operativo)"),
+    ("11", "Volver (cambiar sistema operativo)"),
     ("0", "Salir"),
 ]
 
@@ -194,19 +212,26 @@ def pantalla_acciones():
         elif opcion == "4":
             _red_team_solo("ms17-010", "Red Team — MS17-010 Checker")
         elif opcion == "5":
+            _red_team_solo(
+                "ms17-010-no-exfil", "Red Team — MS17-010 Exploit (sin extracción)"
+            )
+
+        elif opcion == "6":
             banner("Red Team — MS17-010 Extracción de Archivos")
             result = ejecutar_extraccion_ms17(os_actual)
             mostrar_resultado_ataque(result)
             separador("fin")
 
-        elif opcion == "6":
-            _simular("normal")
         elif opcion == "7":
-            _simular("vuln")
+            _simular("normal")
         elif opcion == "8":
+            _simular("vuln")
+        elif opcion == "9":
+            _simular("ms17-010-no-exfil")
+        elif opcion == "10":
             _simular("ms17-010-extract")
 
-        elif opcion == "9":
+        elif opcion == "11":
             nuevo = _pantalla_seleccion_so()
             if nuevo:
                 os_actual = nuevo

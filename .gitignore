@@ -22,3 +22,5 @@ Telemetria/
 
 # Marcadores de setup
 .cdt_setup_done
+
+output/

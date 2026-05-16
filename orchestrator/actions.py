@@ -11,9 +11,6 @@ from Agentes.Red.hacker_agent import ejecutar_ataque
 from Agentes.Blue.soc_agent import capturar_trafico, analizar_logs_llm
 from Agentes.Blue.cvss import calcular_cvss, clasificar
 from Agentes.Red.Herramientas.ms17_010_extract import ejecutar_extraccion
-from reports.exporter import PDFExporter
-from reports.csv_exporter import CSVExporter
-from cli.export_menu import select_export_format
 
 
 def _cfg(os_name):
@@ -53,10 +50,7 @@ def ejecutar_extraccion_ms17(os_name: str) -> dict:
         return {"status": "error", "message": str(e)}
 
 
-def restaurar_entorno(os_name: str) -> dict:
-    cfg = _cfg(os_name)
-    res = restore_snapshot(cfg["VM_NAME"], cfg["SNAPSHOT"])
-    start_vm(cfg["VM_NAME"])
+def limpiar_exfil() -> None:
     exfil = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         "Telemetria",
@@ -64,10 +58,17 @@ def restaurar_entorno(os_name: str) -> dict:
     )
     if os.path.exists(exfil):
         shutil.rmtree(exfil)
+
+
+def restaurar_entorno(os_name: str) -> dict:
+    cfg = _cfg(os_name)
+    res = restore_snapshot(cfg["VM_NAME"], cfg["SNAPSHOT"])
+    start_vm(cfg["VM_NAME"])
+    limpiar_exfil()
     return {
         "status": "success",
         "message": res["message"],
-        "exfil_cleaned": os.path.exists(exfil) is False,
+        "exfil_cleaned": True,
     }
 
 
@@ -88,6 +89,7 @@ class SimulacionResult:
         self.vm_restore_msg: str = ""
         self.modo: str = ""
         self.os_name: str = ""
+        self.report_data: dict | None = None
 
 
 def ejecutar_simulacion(modo: str, os_name: str) -> SimulacionResult:
@@ -99,8 +101,7 @@ def ejecutar_simulacion(modo: str, os_name: str) -> SimulacionResult:
 
     try:
         # Fase 1: Preparación
-        res_restore = restore_snapshot(cfg["VM_NAME"], cfg["SNAPSHOT"])
-        result.vm_restore_msg = res_restore["message"]
+        limpiar_exfil()
         start_vm(cfg["VM_NAME"])
         time.sleep(5)
 
@@ -112,7 +113,9 @@ def ejecutar_simulacion(modo: str, os_name: str) -> SimulacionResult:
         hilo.start()
 
         tiempo_escucha = (
-            15 if modo == "normal" else (30 if modo == "ms17-010-extract" else 45)
+            15
+            if modo == "normal"
+            else 30 if modo in ("ms17-010-no-exfil", "ms17-010-extract") else 45
         )
         captura = capturar_trafico(segundos=tiempo_escucha, modo=modo)
         hilo.join()
@@ -140,33 +143,19 @@ def ejecutar_simulacion(modo: str, os_name: str) -> SimulacionResult:
             metrics = v.get("CVSS_metrics", {})
             result.cvss_score = calcular_cvss(metrics)
             result.cvss_nivel = clasificar(result.cvss_score)
-        if llm_resp and logs:
 
-            vulns = llm_resp.get("vulnerabilities", [])
-
-            if vulns:
-
-                v = vulns[0]
-
-                report_data = {
-                    "threat": v.get("name", "Amenaza detectada"),
-                    "target_os": os_name,
-                    "cvss": f"{result.cvss_score} [{result.cvss_nivel}]",
-                    "description": v.get("description", ""),
-                    "technical_explanation": v.get(
-                        "technical_explanation", ""
-                    ),
-                    "mitigations": v.get("mitigations", []),
-                    "logs": "\n".join(logs)
-                }
-
-                export_option = select_export_format()
-
-                if export_option == "1":
-                    PDFExporter.export(report_data)
-
-                elif export_option == "2":
-                    CSVExporter.export(report_data)
+            result.report_data = {
+                "threat": v.get("type", "Amenaza detectada"),
+                "target_os": os_name,
+                "cvss": f"{result.cvss_score} [{result.cvss_nivel}]",
+                "description": v.get("description", ""),
+                "technical_explanation": v.get("explanation", ""),
+                "mitigations": [
+                    {"description": r, "command": "", "severity": "MEDIA", "note": ""}
+                    for r in (v.get("recommendations") or [])
+                ],
+                "logs": "\n".join(logs) if logs else "",
+            }
     except Exception as e:
         result.status = "error"
         result.error_msg = str(e)

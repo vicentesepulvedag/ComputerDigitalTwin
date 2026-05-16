@@ -39,30 +39,17 @@ class CSVExporter:
 
             writer.writerow(["Campo", "Detalle"])
 
-            writer.writerow([
-                "Amenaza",
-                report_data.get("threat", "")
-            ])
+            writer.writerow(["Amenaza", report_data.get("threat", "")])
 
-            writer.writerow([
-                "SO Objetivo",
-                report_data.get("target_os", "")
-            ])
+            writer.writerow(["SO Objetivo", report_data.get("target_os", "")])
 
-            writer.writerow([
-                "CVSS",
-                report_data.get("cvss", "")
-            ])
+            writer.writerow(["CVSS", report_data.get("cvss", "")])
 
-            writer.writerow([
-                "Descripción",
-                report_data.get("description", "")
-            ])
+            writer.writerow(["Descripción", report_data.get("description", "")])
 
-            writer.writerow([
-                "Explicación Técnica",
-                report_data.get("technical_explanation", "")
-            ])
+            writer.writerow(
+                ["Explicación Técnica", report_data.get("technical_explanation", "")]
+            )
 
             writer.writerow([])
 
@@ -72,28 +59,18 @@ class CSVExporter:
 
             for mitigation in mitigations:
 
-                writer.writerow([
-                    mitigation.get("severity", "")
-                ])
+                writer.writerow([mitigation.get("severity", "")])
 
-                writer.writerow([
-                    mitigation.get("description", "")
-                ])
+                writer.writerow([mitigation.get("description", "")])
 
-                writer.writerow([
-                    mitigation.get("command", "")
-                ])
+                writer.writerow([mitigation.get("command", "")])
 
-                writer.writerow([
-                    mitigation.get("note", "")
-                ])
+                writer.writerow([mitigation.get("note", "")])
 
                 writer.writerow([])
 
             writer.writerow(["Logs"])
 
-            writer.writerow([
-                report_data.get("logs", "")
-            ])
+            writer.writerow([report_data.get("logs", "")])
 
         print(f"[+] CSV generado: {filename}")

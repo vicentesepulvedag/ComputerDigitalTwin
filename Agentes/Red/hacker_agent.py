@@ -9,7 +9,10 @@ from config.settings import OS_CONFIGS, TARGET_PORTS, seleccionar_os
 from Agentes.Red.Herramientas.nmap_scanner import run_nmap_scan
 from Agentes.Red.Herramientas.nmap_vuln_scanner import run_nmap_vuln_scan
 from Agentes.Red.Herramientas.ms17_010_checker import check_vulnerability
-from Agentes.Red.Herramientas.ms17_010_extract import ejecutar_extraccion
+from Agentes.Red.Herramientas.ms17_010_extract import (
+    ejecutar_extraccion,
+    ejecutar_exploit_sin_exfil,
+)
 
 
 def ejecutar_ataque(modo="normal", os_name=None) -> dict:
@@ -42,6 +45,13 @@ def ejecutar_ataque(modo="normal", os_name=None) -> dict:
                 "status": "success",
                 "message": "MS17-010 check completado.",
                 "data": "\n".join(lines),
+            }
+        elif modo == "ms17-010-no-exfil":
+            ejecutar_exploit_sin_exfil(os_name=os_name)
+            return {
+                "status": "success",
+                "message": "MS17-010 exploit sin exfiltración completado.",
+                "data": "Exploit MS17-010 ejecutado sin extracción de archivos.",
             }
         elif modo == "ms17-010-extract":
             ejecutar_extraccion(os_name=os_name)
