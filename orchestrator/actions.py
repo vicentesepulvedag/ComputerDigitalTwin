@@ -11,6 +11,9 @@ from Agentes.Red.hacker_agent import ejecutar_ataque
 from Agentes.Blue.soc_agent import capturar_trafico, analizar_logs_llm
 from Agentes.Blue.cvss import calcular_cvss, clasificar
 from Agentes.Red.Herramientas.ms17_010_extract import ejecutar_extraccion
+from reports.exporter import PDFExporter
+from reports.csv_exporter import CSVExporter
+from cli.menu import select_export_format
 
 
 def _cfg(os_name):
@@ -137,7 +140,33 @@ def ejecutar_simulacion(modo: str, os_name: str) -> SimulacionResult:
             metrics = v.get("CVSS_metrics", {})
             result.cvss_score = calcular_cvss(metrics)
             result.cvss_nivel = clasificar(result.cvss_score)
+        if llm_resp and logs:
 
+            vulns = llm_resp.get("vulnerabilities", [])
+
+            if vulns:
+
+                v = vulns[0]
+
+                report_data = {
+                    "threat": v.get("name", "Amenaza detectada"),
+                    "target_os": os_name,
+                    "cvss": f"{result.cvss_score} [{result.cvss_nivel}]",
+                    "description": v.get("description", ""),
+                    "technical_explanation": v.get(
+                        "technical_explanation", ""
+                    ),
+                    "mitigations": v.get("mitigations", []),
+                    "logs": "\n".join(logs)
+                }
+
+                export_option = select_export_format()
+
+                if export_option == "1":
+                    PDFExporter.export(report_data)
+
+                elif export_option == "2":
+                    CSVExporter.export(report_data)
     except Exception as e:
         result.status = "error"
         result.error_msg = str(e)
