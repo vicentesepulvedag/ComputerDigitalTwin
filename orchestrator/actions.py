@@ -13,7 +13,7 @@ from Agentes.Blue.cvss import calcular_cvss, clasificar
 from Agentes.Red.Herramientas.ms17_010_extract import ejecutar_extraccion
 from reports.exporter import PDFExporter
 from reports.csv_exporter import CSVExporter
-from cli.menu import select_export_format
+from cli.export_menu import select_export_format
 
 
 def _cfg(os_name):
