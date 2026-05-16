@@ -2,3 +2,4 @@ openai
 python-dotenv
 impacket
 rich
+reportlab
