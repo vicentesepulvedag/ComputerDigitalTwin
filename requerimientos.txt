@@ -3,3 +3,4 @@ python-dotenv
 impacket
 rich
 reportlab
+networkx

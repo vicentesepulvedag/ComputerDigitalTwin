@@ -11,6 +11,7 @@ from Agentes.Red.hacker_agent import ejecutar_ataque
 from Agentes.Blue.soc_agent import capturar_trafico, analizar_logs_llm
 from Agentes.Blue.cvss import calcular_cvss, clasificar
 from Agentes.Red.Herramientas.ms17_010_extract import ejecutar_extraccion
+from digital_twin import init_twin, get_twin
 
 
 def _cfg(os_name):
@@ -37,7 +38,83 @@ def seleccionar_os() -> str:
     return None  # señal de "mantener actual"
 
 
+def _init_graph():
+    dt = get_twin()
+    if dt.graph.number_of_nodes() == 0:
+        init_twin(OS_CONFIGS)
+
+
+def _update_graph_from_attack(modo: str, os_name: str):
+    dt = get_twin()
+    vm_id = os_name.lower().replace(" ", "_")
+    from datetime import datetime
+
+    ts = datetime.now().isoformat(timespec="seconds")
+    step_id = f"attack_{vm_id}_{modo}_{ts.replace(':', '-')}"
+
+    desc_map = {
+        "normal": "Escaneo de puertos básico (nmap)",
+        "vuln": "Escaneo de vulnerabilidades (nmap --script vuln)",
+        "ms17-010": "Verificación MS17-010 (EternalBlue Checker)",
+        "ms17-010-no-exfil": "Exploit MS17-010 sin exfiltración",
+        "ms17-010-extract": "Exploit MS17-010 con exfiltración de archivos",
+    }
+    dt.add_attack_step(step_id, modo, desc_map.get(modo, modo), ts)
+
+    attack_origin = "attack_origin"
+    if dt.graph.has_node(attack_origin):
+        dt.link_steps(attack_origin, step_id)
+
+    dt.link_attack_target(step_id, vm_id)
+
+    svc_id = f"{vm_id}/smb"
+    if dt.graph.has_node(svc_id) and modo in (
+        "ms17-010", "ms17-010-no-exfil", "ms17-010-extract",
+    ):
+        vuln_id = f"{svc_id}/ms17-010"
+        if not dt.graph.has_node(vuln_id):
+            dt.add_vulnerability(
+                vuln_id, "CVE-2017-0144",
+                "EternalBlue — desbordamiento de búfer en SMBv1",
+                severity="CRITICAL",
+            )
+            dt.link_service_vulnerability(svc_id, vuln_id)
+        dt.link_attack_exploit(step_id, vuln_id)
+
+    if modo in ("vuln",):
+        vuln_id = f"{svc_id}/cve-scan"
+        if not dt.graph.has_node(vuln_id):
+            dt.add_vulnerability(
+                vuln_id, "N/A (escanéo general)",
+                "Vulnerabilidades detectadas por escaneo nmap",
+                severity="MEDIA",
+            )
+            dt.link_service_vulnerability(svc_id, vuln_id)
+
+    if modo == "ms17-010-extract":
+        file_id = f"{vm_id}/extracted_data"
+        if not dt.graph.has_node(file_id):
+            dt.add_file(file_id, "C:\\Telemetria\\exfil\\*")
+        dt.link_attack_exfil(step_id, file_id)
+
+
+def _update_graph_from_detection(os_name: str, llm_response: dict):
+    dt = get_twin()
+    vulns = llm_response.get("vulnerabilities", [])
+    if not vulns:
+        return
+    v = vulns[0]
+    detection_id = f"detection_{os_name.lower().replace(' ', '_')}_{v.get('type', 'unknown')}"
+    dt.add_node(detection_id, "detection", threat_type=v.get("type", ""), description=v.get("description", ""))
+
+    steps = dt.get_attackers()
+    if steps:
+        dt.link_attack_detected(steps[-1], detection_id)
+
+
 def ejecutar_red_team(modo: str, os_name: str) -> dict:
+    _init_graph()
+    _update_graph_from_attack(modo, os_name)
     resultado = ejecutar_ataque(modo=modo, os_name=os_name)
     return resultado
 
@@ -97,6 +174,9 @@ def ejecutar_simulacion(modo: str, os_name: str) -> SimulacionResult:
     result.modo = modo
     result.os_name = os_name
 
+    _init_graph()
+    _update_graph_from_attack(modo, os_name)
+
     cfg = _cfg(os_name)
 
     try:
@@ -136,6 +216,8 @@ def ejecutar_simulacion(modo: str, os_name: str) -> SimulacionResult:
 
         llm_resp = analizar_logs_llm(logs)
         result.llm_response = llm_resp
+
+        _update_graph_from_detection(os_name, llm_resp)
 
         vulns = llm_resp.get("vulnerabilities", [])
         if vulns:

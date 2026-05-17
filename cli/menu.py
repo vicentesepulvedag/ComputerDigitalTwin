@@ -16,8 +16,10 @@ from cli.display import (
     con_progreso,
     mostrar_resultado_ataque,
     mostrar_reporte_incidente,
+    mostrar_grafo,
 )
 from config.settings import OS_CONFIGS, set_os
+from digital_twin import get_twin, init_twin
 from orchestrator.actions import (
     seleccionar_os,
     ejecutar_red_team,
@@ -160,8 +162,11 @@ _pantalla_accion_items: list[tuple[str, str]] = [
     ("8", "Ataque con CVEs + SOC"),
     ("9", "MS17-010 sin exfiltración + SOC"),
     ("10", "MS17-010 con exfiltración + SOC"),
+    ("", "[bold]--- Digital Twin ---[/]"),
+    ("11", "Ver grafo de infraestructura"),
+    ("12", "Exportar grafo (JSON)"),
     ("", "[bold]--- ---[/]"),
-    ("11", "Volver (cambiar sistema operativo)"),
+    ("13", "Volver (cambiar sistema operativo)"),
     ("0", "Salir"),
 ]
 
@@ -232,12 +237,31 @@ def pantalla_acciones():
             _simular("ms17-010-extract")
 
         elif opcion == "11":
+            dt = get_twin()
+            if dt.graph.number_of_nodes() == 0:
+                dt = init_twin(OS_CONFIGS)
+            mostrar_grafo(dt)
+            separador("fin")
+
+        elif opcion == "12":
+            dt = get_twin()
+            if dt.graph.number_of_nodes() == 0:
+                dt = init_twin(OS_CONFIGS)
+            from datetime import datetime
+            import json
+
+            path = f"reports/output/digital_twin_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            with open(path, "w") as f:
+                json.dump(dt.to_json_serializable(), f, indent=2)
+            ok(f"Grafo exportado a: {path}")
+            separador("fin")
+
+        elif opcion == "13":
             nuevo = _pantalla_seleccion_so()
             if nuevo:
                 os_actual = nuevo
                 ok(f"SO cambiado a: {os_actual}")
             else:
-                # reintentar selección
                 pass
 
         else:

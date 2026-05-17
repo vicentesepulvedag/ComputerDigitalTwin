@@ -1,6 +1,7 @@
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
+from rich.tree import Tree
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.syntax import Syntax
 from rich.markdown import Markdown
@@ -181,3 +182,72 @@ def mostrar_reporte_incidente(
             box=box.ROUNDED,
         )
         console.print(panel)
+
+
+def mostrar_grafo(dt) -> None:
+    from digital_twin import DigitalTwinGraph
+
+    s = dt.summary()
+    banner("DIGITAL TWIN — Modelo de Grafo", "bold green")
+
+    etiquetas = {"vm": "computador", "attack_step": "paso_ataque", "vulnerability": "vulnerabilidad",
+                  "service": "servicio", "network": "red", "user": "usuario", "file": "archivo",
+                  "attack_origin": "origen_ataque", "detection": "deteccion"}
+    table = Table(box=box.SIMPLE_HEAD, border_style="green")
+    table.add_column("Tipo de Nodo", style="bold cyan")
+    table.add_column("Cantidad", style="bold yellow")
+    for nt, count in sorted(s["nodes_by_type"].items()):
+        table.add_row(etiquetas.get(nt, nt), str(count))
+    table.add_row("", "")
+    table.add_row("[bold]TOTAL[/]", f"[bold]{s['total_nodes']}[/]")
+    console.print(table)
+
+    if s["edges_by_type"]:
+        etable = Table(box=box.SIMPLE_HEAD, border_style="green")
+        etable.add_column("Tipo de Relación", style="bold cyan")
+        etable.add_column("Cantidad", style="bold yellow")
+        for et, count in sorted(s["edges_by_type"].items()):
+            etable.add_row(et, str(count))
+        etable.add_row("", "")
+        etable.add_row("[bold]TOTAL[/]", f"[bold]{s['total_edges']}[/]")
+        console.print(etable)
+
+    tree = Tree("[bold green]Digital Twin — Infraestructura[/]")
+    for n, d in dt.graph.nodes(data=True):
+        if d.get("node_type") == "vm":
+            vm_node = tree.add(f"[bold cyan]🖥 Computador: {d.get('name', n)}[/] ({d.get('os_version', '')})")
+            vm_node.add(f"[dim]IP: {d.get('ip', '')}[/]")
+            for _, v, ed in dt.graph.out_edges(n, data=True):
+                vt = dt.graph.nodes[v].get("node_type", "")
+                if vt == "service":
+                    svc_data = dt.graph.nodes[v]
+                    svc_branch = vm_node.add(
+                        f"[yellow]🔌 {svc_data.get('name', v)}[/] (:{svc_data.get('port', '')})"
+                    )
+                    for _, v2, ed2 in dt.graph.out_edges(v, data=True):
+                        v2t = dt.graph.nodes[v2].get("node_type", "")
+                        if v2t == "vulnerability":
+                            vuln_data = dt.graph.nodes[v2]
+                            sev = vuln_data.get("severity", "")
+                            color = "red" if sev == "CRITICAL" else "yellow"
+                            svc_branch.add(
+                                f"[{color}]⚠ {vuln_data.get('cve', v2)}[/] ({sev})"
+                            )
+                elif vt == "user":
+                    u_data = dt.graph.nodes[v]
+                    vm_node.add(f"[blue]👤 {u_data.get('username', v)}[/]")
+
+    attack_nodes = [(n, d) for n, d in dt.graph.nodes(data=True) if d.get("node_type") == "attack_step"]
+    if attack_nodes:
+        attack_branch = tree.add("[bold red]⚔ Historial de Ataques[/]")
+        for n, d in attack_nodes:
+            target_vm = ""
+            for _, t, ed in dt.graph.out_edges(n, data=True):
+                if ed.get("edge_type") == "targets":
+                    tdata = dt.graph.nodes[t]
+                    target_vm = f" → [bold]{tdata.get('name', t)}[/]"
+            attack_branch.add(
+                f"[red]{d.get('attack_type', n)}[/]: {d.get('description', '')}{target_vm}"
+            )
+
+    console.print(tree)
