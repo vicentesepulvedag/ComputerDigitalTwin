@@ -3,7 +3,7 @@ import subprocess
 
 from rich.table import Table
 from rich import box
-from rich.prompt import Prompt
+from rich.prompt import Prompt, Confirm
 
 from cli.display import (
     console,
@@ -93,6 +93,11 @@ def _simular(modo: str):
 
             CSVExporter.export(result.report_data)
 
+        if Confirm.ask("[bold cyan]¿Abrir chat con el agente SOC para consultar sobre el reporte?[/]", default=True):
+            from cli.chat_agent import iniciar_chat
+
+            iniciar_chat(result.report_data)
+
     separador("fin")
 
 
@@ -123,12 +128,38 @@ def _pantalla_seleccion_so() -> str | None:
         cfg = OS_CONFIGS[nombre]
         table.add_row(str(i), nombre, cfg["VM_NAME"], cfg["TARGET_IP"])
 
+    table.add_row("R", "[bold green]Restaurar todas las VMs[/]", "", "")
     table.add_row("0", "[bold red]Salir[/]", "", "")
     console.print(table)
 
     opcion = Prompt.ask(
         "\n[bold cyan]Elige un sistema operativo[/]", default="", show_default=False
     )
+
+    if opcion.lower() == "r":
+        from Infraestructura.vm_manager import restore_snapshot, start_vm
+        from orchestrator.actions import limpiar_exfil
+
+        banner("Restaurando todas las VMs", "bold green")
+        errores = []
+        for nombre, cfg in OS_CONFIGS.items():
+            info(f"Restaurando {nombre} ({cfg['VM_NAME']})...")
+            try:
+                with con_progreso(f"Restaurando {cfg['VM_NAME']}") as progress:
+                    progress.add_task("", total=None)
+                    restore_snapshot(cfg["VM_NAME"], cfg["SNAPSHOT"])
+                    start_vm(cfg["VM_NAME"])
+                ok(f"{nombre} restaurada e iniciada.")
+            except Exception as e:
+                error(f"{nombre}: {e}")
+                errores.append(nombre)
+        limpiar_exfil()
+        if not errores:
+            ok("Todas las VMs restauradas exitosamente.")
+        else:
+            error(f"Fallaron: {', '.join(errores)}")
+        separador("fin")
+        return None
 
     if opcion == "0":
         sys.exit(0)
