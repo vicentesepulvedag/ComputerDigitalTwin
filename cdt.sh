@@ -16,13 +16,22 @@ main() {
         echo "=== Computer Digital Twin — Instalación inicial ==="
         echo ""
 
-        if ! groups "$USER" | grep -q libvirt; then
-            echo "[*] Agregando $USER al grupo libvirt..."
-            sudo usermod -aG libvirt "$USER" || {
-                echo "[!] Error al agregar al grupo libvirt."
+        if [ -f "$SCRIPT_DIR/.env" ]; then
+            source "$SCRIPT_DIR/.env"
+        fi
+
+        TARGET_GROUP="libvirt"
+        if [ "$VM_PROVIDER" = "VIRTUALBOX" ]; then
+            TARGET_GROUP="vboxusers"
+        fi
+
+        if ! groups "$USER" | grep -q "$TARGET_GROUP"; then
+            echo "[*] Agregando $USER al grupo $TARGET_GROUP..."
+            sudo usermod -aG "$TARGET_GROUP" "$USER" || {
+                echo "[!] Error al agregar al grupo $TARGET_GROUP."
                 return 1
             }
-            echo "[!] Cambio de grupo aplicado. Es necesario cerrar sesión o ejecutar 'newgrp libvirt'."
+            echo "[!] Cambio de grupo aplicado. Es necesario reiniciar o ejecutar 'newgrp $TARGET_GROUP'."
             echo "    Luego puedes volver a ejecutar este script."
             return 1
         fi
