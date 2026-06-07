@@ -72,7 +72,7 @@ set_os("Windows XP")
 
 VM_PROVIDER = os.getenv("VM_PROVIDER", "libvirt")
 TARGET_PORTS = "139,445"
-IFACE = "virbr1"
+IFACE = os.getenv("IFACE", "vboxnet0" if VM_PROVIDER == "VIRTUALBOX" else "virbr1")
 
 # Filtro BPF para tcpdump/tshark enfocado solo en la VM para reducir ruido
 CAPTURE_FILTER = f"host {TARGET_IP}"

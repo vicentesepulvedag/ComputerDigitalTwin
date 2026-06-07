@@ -23,6 +23,11 @@ main() {
         TARGET_GROUP="libvirt"
         if [ "$VM_PROVIDER" = "VIRTUALBOX" ]; then
             TARGET_GROUP="vboxusers"
+            
+            # --- Corrección para VirtualBox Host-Only IP Restriction ---
+            echo "[*] Configurando redes permitidas de VirtualBox..."
+            sudo mkdir -p /etc/vbox
+            echo "* 10.0.0.0/8 192.168.0.0/16 2001::/64" | sudo tee /etc/vbox/networks.conf >/dev/null
         fi
 
         if ! groups "$USER" | grep -q "$TARGET_GROUP"; then
