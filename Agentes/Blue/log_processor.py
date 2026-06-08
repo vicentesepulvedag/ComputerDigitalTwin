@@ -124,17 +124,17 @@ def summarize_logs(logs: list) -> dict:
         indicadores.append("smb_heavy_traffic")
     
     # Hacer que MS17 sea estricto para las ráfagas densas
-    if smb_port_445_count >= 10 and len(repeated_sizes) >= 2 and is_bursty:
+    if smb_port_445_count >= 10 and len(repeated_sizes) >= 2 and is_bursty and not is_spaced:
         indicadores.append("ms17_grooming")
     
     # Hacer que escritura andX sea también atada a comportamientos sospechosos rápidos
     if smb_ports_count >= 3 and any("P" in str(flag) for flag in flags_counts):
         write_andx = sum(1 for s in payload_sizes if 18 <= s <= 168)
-        if write_andx >= 5 and is_bursty:
+        if write_andx >= 5 and is_bursty and not is_spaced:
             indicadores.append("ms17_writeandx_pipe")
             
     # Etiqueta amigable para escaneos espaciados como Nmap NSE
-    if smb_ports_count >= 10 and is_spaced and not is_bursty:
+    if smb_ports_count >= 5 and is_spaced:
         indicadores.append("nmap_nse_spaced_scan")
 
     return {
