@@ -30,6 +30,15 @@ client_pro = OpenAI(
 )
 
 
+def _select_detection_llm():
+    """Prioriza el modelo/API premium para análisis de logs, con fallback seguro."""
+    better_model = getattr(config.settings, "LLM_BETTER_MODEL", None)
+    better_key = getattr(config.settings, "LLM_BETTER_API_KEY", None)
+    if better_model and better_key:
+        return client_pro, better_model
+    return client, config.settings.LLM_MODEL
+
+
 def capturar_trafico(segundos: int = 15, modo: str = "normal") -> dict:
     try:
         include_payload = modo in ("vuln", "ms17-010-no-exfil", "ms17-010-extract")
@@ -99,8 +108,9 @@ Para escaneo básico: AV=NETWORK(0.85), AC=LOW(0.77), PR=NONE(0.85), UI=NONE(0.8
 {{"vulnerabilities": []}} si no hay actividad ofensiva clara.
 """
     try:
-        response = client.chat.completions.create(
-            model=config.settings.LLM_MODEL,
+        detection_client, detection_model = _select_detection_llm()
+        response = detection_client.chat.completions.create(
+            model=detection_model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,
         )
