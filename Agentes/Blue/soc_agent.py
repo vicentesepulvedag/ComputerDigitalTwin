@@ -76,11 +76,14 @@ Logs:
 
 Clasifica la actividad en UNA de estas categorías (o ninguna):
 
+REGLA DE ORO OBLIGATORIA MÁXIMA PRIORIDAD: 
+Si en "indicators" aparece "nmap_nse_spaced_scan", es ABSOLUTAMENTE PROHIBIDO clasificarlo como EXPLOTACIÓN MS17-010 o POST-EXPLOTACIÓN. DEBES clasificarlo SIEMPRE como "ESCANEO DE VULNERABILIDADES (Nmap NSE)", pase lo que pase, aunque veas paquetes SMB grandes u otros indicadores cruzados, ya que ha sido confirmado matemáticamente como un Escáner por las pausas de red.
+
 1) ESCANEO BÁSICO (Nmap SYN) — Paquetes SYN aislados sin payload, a múltiples puertos, sin continuación. Severidad BAJA.
 
-2) ESCANEO DE VULNERABILIDADES (Nmap NSE) — Conexiones ordenadas y espaciadas a puertos SMB (139, 445). Cada comando SMB tiene request+response antes del siguiente. Accede a varios named pipes (browser, samr, srvsvc, spoolss) en secuencia. Tamaños de paquete variados. Severidad MEDIA.
+2) ESCANEO DE VULNERABILIDADES (Nmap NSE) — Conexiones a puertos SMB (139, 445) que tienen PAUSAS o son espaciadas en el tiempo. Aparece el indicador "nmap_nse_spaced_scan" en "indicators". Accede a varios named pipes (browser, samr, srvsvc, spoolss) en secuencia para buscar información o credenciales, pero no es un exploit de buffer overflow. Severidad MEDIA.
 
-3) EXPLOTACIÓN MS17-010 ETERNALBLUE — CRITERIOS ESTRICTOS (debe cumplir VARIOS):
+3) EXPLOTACIÓN MS17-010 ETERNALBLUE — CRITERIOS ESTRICTOS (debe cumplir los siguientes):
    - Ráfaga de paquetes en < 1 segundo (grooming: 4-8 paquetes de TAMAÑO IDÉNTICO, ej. varios de 102 bytes seguidos)
    - Paquetes SMB Transaction Secondary con payloads grandes (>1000 bytes) o fragmentados en segmentos de ~1448 bytes
    - Múltiples operaciones WriteAndX raw pipe simultáneas (sin esperar respuesta entre ellas)
