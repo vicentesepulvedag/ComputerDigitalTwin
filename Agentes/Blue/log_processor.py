@@ -101,17 +101,47 @@ def summarize_logs(logs: list) -> dict:
             gaps = [smb_secs[i + 1] - smb_secs[i] for i in range(len(smb_secs) - 1)]
             max_gap = max(gaps)
             min_gap = min(gaps)
+            avg_gap = span / max(len(smb_secs), 1)
+
+            # Ventana deslizante: encontrar la ráfaga más densa de N paquetes
+            # para aislar el exploit del tráfico SMB de fondo
+            window_size = min(10, len(smb_secs))
+            if window_size >= 3:
+                min_cluster = min(
+                    smb_secs[i + window_size - 1] - smb_secs[i]
+                    for i in range(len(smb_secs) - window_size + 1)
+                )
+                cluster_pps = window_size / max(min_cluster, 0.01)
+            else:
+                cluster_pps = len(smb_secs) / max(span, 0.01)
+
+            large_gap_ratio = sum(1 for g in gaps if g > 0.5) / max(len(gaps), 1)
+
             burst_info = {
                 "smb_total_seconds": round(span, 2),
                 "smb_packet_count": len(smb_secs),
                 "smb_packets_per_second": round(len(smb_secs) / max(span, 0.01), 1),
                 "min_gap_seconds": round(min_gap, 4),
                 "max_gap_seconds": round(max_gap, 2),
+                "avg_gap_seconds": round(avg_gap, 4),
+                "cluster_pps": round(cluster_pps, 1),
+                "cluster_window": window_size,
+                "large_gap_ratio": round(large_gap_ratio, 2),
             }
 
     smb_pps = burst_info.get("smb_packets_per_second", 0)
-    is_bursty = smb_pps > 10.0  # EternalBlue enviará ráfagas densas
-    is_spaced = burst_info.get("max_gap_seconds", 0) > 0.5  # Nmap hace pausas
+    cluster_pps = burst_info.get("cluster_pps", smb_pps)
+    large_gap_ratio = burst_info.get("large_gap_ratio", 0)
+
+    # Transaction Secondary de EternalBlue envía payloads > 1000 bytes (fragmentos a ~1448)
+    # Nmap NSE solo envía paquetes SMB de control (50-500 bytes)
+    has_large_smb = any(s > 1000 for s in payload_sizes)
+
+    # EternalBlue: ráfaga extremadamente densa (fire-and-forget, 1000+ pps)
+    # Nmap NSE scripts: síncrono, limitado por RTT (~10-30 pps)
+    is_bursty = cluster_pps > 30.0 and smb_pps > 5.0
+    # Nmap NSE: consistentemente espaciado (>50% de gaps > 0.5s)
+    is_spaced = large_gap_ratio > 0.5
 
     indicadores = []
     if len(dst_ports) >= 5 and length_nonzero > 0:
@@ -122,19 +152,29 @@ def summarize_logs(logs: list) -> dict:
         indicadores.append("syn_scan_pattern")
     if smb_ports_count >= 3 and length_nonzero > 10:
         indicadores.append("smb_heavy_traffic")
-    
-    # Hacer que MS17 sea estricto para las ráfagas densas
-    if smb_port_445_count >= 10 and len(repeated_sizes) >= 2 and is_bursty and not is_spaced:
+
+    # ms17_grooming: requiere ráfaga + Transaction Secondary (payloads > 1000 bytes)
+    # Nmap NSE nunca genera payloads SMB > 1000 bytes
+    if (
+        smb_port_445_count >= 10
+        and len(repeated_sizes) >= 2
+        and is_bursty
+        and has_large_smb
+    ):
         indicadores.append("ms17_grooming")
-    
-    # Hacer que escritura andX sea también atada a comportamientos sospechosos rápidos
-    if smb_ports_count >= 3 and any("P" in str(flag) for flag in flags_counts):
+
+    # ms17_writeandx_pipe: operaciones de escritura en ráfaga + payloads grandes
+    if (
+        smb_ports_count >= 3
+        and any("P" in str(flag) for flag in flags_counts)
+        and has_large_smb
+    ):
         write_andx = sum(1 for s in payload_sizes if 18 <= s <= 168)
-        if write_andx >= 5 and is_bursty and not is_spaced:
+        if write_andx >= 5 and is_bursty:
             indicadores.append("ms17_writeandx_pipe")
-            
-    # Etiqueta amigable para escaneos espaciados como Nmap NSE
-    if smb_ports_count >= 5 and is_spaced:
+
+    # Nmap NSE: espaciado CONSISTENTE y además NO es ráfaga
+    if smb_ports_count >= 5 and is_spaced and not is_bursty:
         indicadores.append("nmap_nse_spaced_scan")
 
     return {
