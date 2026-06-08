@@ -63,10 +63,18 @@ def summarize_logs(logs: list) -> dict:
         for port in re.findall(r"\b\d{1,3}(?:\.\d{1,3}){3}\.(\d{1,5})\b", log):
             ports.add(port)
 
-    smb_port_445_count = sum(1 for p in dst_ports if p == "445")
-    smb_ports = sum(1 for p in dst_ports if p in ("139", "445"))
+    smb_port_445_count = 0
+    smb_ports_count = 0
     payload_sizes = []
     for log in logs:
+        match = re.search(r"(\d+\.\d+\.\d+\.\d+)\.(\d+) > (\d+\.\d+\.\d+\.\d+)\.(\d+):", log)
+        if match:
+            dst_port = match.group(4)
+            if dst_port == "445":
+                smb_port_445_count += 1
+            if dst_port in ("139", "445"):
+                smb_ports_count += 1
+        
         m = re.search(r"length (\d+)", log, re.IGNORECASE)
         if m:
             payload_sizes.append(int(m.group(1)))
@@ -82,11 +90,11 @@ def summarize_logs(logs: list) -> dict:
         indicadores.append("stealth_flag_scan")
     if "syn" in flags_counts and len(dst_ports) >= 5:
         indicadores.append("syn_scan_pattern")
-    if smb_ports >= 3 and length_nonzero > 10:
+    if smb_ports_count >= 3 and length_nonzero > 10:
         indicadores.append("smb_heavy_traffic")
     if smb_port_445_count >= 5 and len(repeated_sizes) >= 2:
         indicadores.append("ms17_grooming")
-    if smb_ports >= 3 and any("P" in str(flag) for flag in flags_counts):
+    if smb_ports_count >= 3 and any("P" in str(flag) for flag in flags_counts):
         write_andx = sum(1 for s in payload_sizes if 18 <= s <= 168)
         if write_andx >= 5:
             indicadores.append("ms17_writeandx_pipe")
@@ -135,7 +143,7 @@ def summarize_logs(logs: list) -> dict:
         "burst": burst_info,
         "smb_traffic": {
             "port_445_packets": smb_port_445_count,
-            "total_smb_packets": smb_ports,
+            "total_smb_packets": smb_ports_count,
             "write_like_ops": sum(1 for s in payload_sizes if 18 <= s <= 168),
         },
         "repeated_payload_sizes": dict(list(repeated_sizes.items())[:10]),

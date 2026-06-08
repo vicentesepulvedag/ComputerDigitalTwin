@@ -177,6 +177,11 @@ JSON válido (sin markdown, sin texto extra):
 
 
 def analizar_logs_llm(logs: list) -> dict:
+    from Infraestructura.log_parser import normalize_tcpdump_logs
+    # Resumen sobre tódos los logs para no perder contexto por el límite de 40 líneas
+    logs_normalizados = normalize_tcpdump_logs(logs)
+    resumen_trafico = summarize_logs(logs_normalizados)
+
     logs_limpios = filter_relevant_logs(logs)
     if not logs_limpios:
         return {"vulnerabilities": []}
@@ -201,7 +206,6 @@ def analizar_logs_llm(logs: list) -> dict:
                 print(f"[*] Evidencia de exfiltración: {len(lines)} archivos extraídos")
 
     logs_texto = format_logs_for_prompt(logs_limpios)
-    resumen_trafico = summarize_logs(logs_limpios)
 
     print("[*] Fase 1: Detectando vulnerabilidades...")
     detection = _detect_vulnerabilities(logs_texto, resumen_trafico, exfil_context)
