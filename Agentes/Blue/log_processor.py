@@ -83,22 +83,6 @@ def summarize_logs(logs: list) -> dict:
         payload_size_counts[s] = payload_size_counts.get(s, 0) + 1
     repeated_sizes = {k: v for k, v in payload_size_counts.items() if v >= 3 and k > 0}
 
-    indicadores = []
-    if len(dst_ports) >= 5 and length_nonzero > 0:
-        indicadores.append("multi_port_with_payload")
-    if any(flag in flags_counts for flag in ["none", "fpu", "fin", "xmas"]):
-        indicadores.append("stealth_flag_scan")
-    if "syn" in flags_counts and len(dst_ports) >= 5:
-        indicadores.append("syn_scan_pattern")
-    if smb_ports_count >= 3 and length_nonzero > 10:
-        indicadores.append("smb_heavy_traffic")
-    if smb_port_445_count >= 5 and len(repeated_sizes) >= 2:
-        indicadores.append("ms17_grooming")
-    if smb_ports_count >= 3 and any("P" in str(flag) for flag in flags_counts):
-        write_andx = sum(1 for s in payload_sizes if 18 <= s <= 168)
-        if write_andx >= 5:
-            indicadores.append("ms17_writeandx_pipe")
-
     from datetime import datetime
 
     def _ts_to_sec(ts):
@@ -124,6 +108,34 @@ def summarize_logs(logs: list) -> dict:
                 "min_gap_seconds": round(min_gap, 4),
                 "max_gap_seconds": round(max_gap, 2),
             }
+
+    smb_pps = burst_info.get("smb_packets_per_second", 0)
+    is_bursty = smb_pps > 10.0  # EternalBlue enviará ráfagas densas
+    is_spaced = burst_info.get("max_gap_seconds", 0) > 0.5  # Nmap hace pausas
+
+    indicadores = []
+    if len(dst_ports) >= 5 and length_nonzero > 0:
+        indicadores.append("multi_port_with_payload")
+    if any(flag in flags_counts for flag in ["none", "fpu", "fin", "xmas"]):
+        indicadores.append("stealth_flag_scan")
+    if "syn" in flags_counts and len(dst_ports) >= 5:
+        indicadores.append("syn_scan_pattern")
+    if smb_ports_count >= 3 and length_nonzero > 10:
+        indicadores.append("smb_heavy_traffic")
+    
+    # Hacer que MS17 sea estricto para las ráfagas densas
+    if smb_port_445_count >= 10 and len(repeated_sizes) >= 2 and is_bursty:
+        indicadores.append("ms17_grooming")
+    
+    # Hacer que escritura andX sea también atada a comportamientos sospechosos rápidos
+    if smb_ports_count >= 3 and any("P" in str(flag) for flag in flags_counts):
+        write_andx = sum(1 for s in payload_sizes if 18 <= s <= 168)
+        if write_andx >= 5 and is_bursty:
+            indicadores.append("ms17_writeandx_pipe")
+            
+    # Etiqueta amigable para escaneos espaciados como Nmap NSE
+    if smb_ports_count >= 10 and is_spaced and not is_bursty:
+        indicadores.append("nmap_nse_spaced_scan")
 
     return {
         "total_lines": len(logs),

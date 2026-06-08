@@ -94,8 +94,8 @@ Clasifica la actividad en UNA de estas categorías (o ninguna):
 5) POST-EXPLOTACIÓN / EXFILTRACIÓN SMB (SIN EXPLOIT VISIBLE) — Acceso a C$ + descarga de archivos de usuario, pero SIN los patrones de grooming/WriteAndX de EternalBlue. Severidad CRÍTICA.
 
 Guía para NO confundir Nmap NSE con EternalBlue:
-- NSE: conexiones espaciadas (>0.5s entre grupos), tamaños variados, named pipes en orden
-- EternalBlue: ráfaga densa (<0.1s entre paquetes), tamaños duplicados exactos, transacciones solapadas
+- NSE: conexiones espaciadas (>0.5s entre grupos), tamaños variados, named pipes en orden. Aparece el indicador "nmap_nse_spaced_scan" en el resumen.
+- EternalBlue: ráfaga densa (<0.1s entre paquetes), requiere los indicadores "ms17_grooming" o "ms17_writeandx_pipe" en el resumen para considerarse explotación real.
 - Si los logs muestran "flags [S]" (SYN) → es inicio de conexión Nmap, no exploit activo
 - Si el tiempo entre paquetes es >1s → probablemente NSE, no exploit
 
