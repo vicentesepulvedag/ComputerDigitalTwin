@@ -4,6 +4,10 @@ import subprocess
 from rich.table import Table
 from rich import box
 from rich.prompt import Prompt, Confirm
+from rich.panel import Panel
+from rich.syntax import Syntax
+from rich.console import Group as RichGroup
+from rich.text import Text as RichText
 
 from cli.display import (
     console,
@@ -202,6 +206,99 @@ _pantalla_accion_items: list[tuple[str, str]] = [
 ]
 
 
+_explicaciones: dict[str, tuple[str, str, str | None]] = {
+    "2": (
+        "Escaneo de Puertos (nmap TCP Connect)",
+        "Realiza un escaneo TCP Connect (-sT) para descubrir puertos abiertos en el sistema objetivo. "
+        "Se aplican técnicas de evasión: fragmentación de paquetes (-f), "
+        "puerto origen DNS (-g 53, suele estar permitido), "
+        "longitud de datos aleatoria (--data-length 24) y spoofing de MAC (--spoof-mac 0). "
+        "Velocidad máxima (-T5) para acelerar el escaneo.",
+        "sudo nmap -Pn -sT -f -g 53 -T5 --data-length 24 --spoof-mac 0 -p <puertos> --open <target_ip>",
+    ),
+    "3": (
+        "Evaluación de Vulnerabilidades (nmap NSE)",
+        "Ejecuta un escaneo de vulnerabilidades con el Nmap Scripting Engine (NSE). "
+        "Incluye detección de versiones de servicios (-sV) y ejecuta scripts de vulnerabilidades "
+        "conocidas (--script vuln,smb-vuln*). Especialmente efectivo contra servicios SMB/NetBIOS "
+        "en sistemas Windows. Se aplican las mismas técnicas de evasión que el escaneo básico.",
+        "sudo nmap -Pn -sT -sV -f -g 53 -T5 --data-length 24 --spoof-mac 0 -p <puertos> --script vuln,smb-vuln* <target_ip>",
+    ),
+    "4": (
+        "MS17-010 Checker (EternalBlue)",
+        "Verifica si el objetivo es vulnerable al exploit EternalBlue (CVE-2017-0144). "
+        "Se conecta al puerto SMB (445) y envía una transacción especial TRANS_PEEK_NMPIPE. "
+        "Si el sistema retorna STATUS_INVALID_PARAMETER (0xC0000205), es vulnerable. "
+        "También enumera los named pipes accesibles de forma anónima.",
+        None,
+    ),
+    "5": (
+        "MS17-010 Exploit (sin extracción)",
+        "Ejecuta el exploit EternalBlue que aprovecha un desbordamiento de búfer en SMBv1 "
+        "(CVE-2017-0144). Mediante una escritura fuera de los límites (OOB write) en el kernel "
+        "de Windows, obtiene acceso como SYSTEM en el equipo víctima. En esta modalidad "
+        "no se extraen archivos del sistema.",
+        None,
+    ),
+    "6": (
+        "MS17-010 Extracción de Archivos",
+        "Ejecuta el exploit EternalBlue para obtener acceso SYSTEM y luego extrae datos sensibles "
+        "del usuario (cookies de navegador, historial, archivos del escritorio) a través de SMB. "
+        "Si hay credenciales configuradas, extrae directamente sin exploit. "
+        "Los archivos se guardan en el directorio Telemetria/exfil/.",
+        None,
+    ),
+    "7": (
+        "Ataque Básico + SOC",
+        "Realiza un escaneo TCP Connect (-sT) con nmap mientras el Blue Team captura el tráfico "
+        "de red con tcpdump. Luego, un analista SOC basado en IA (DeepSeek) analiza los logs "
+        "para clasificar la amenaza, calcular su puntuación CVSS 3.1 y generar "
+        "recomendaciones de mitigación detalladas.",
+        "sudo nmap -Pn -sT -f -g 53 -T5 --data-length 24 --spoof-mac 0 -p <puertos> --open <target_ip>",
+    ),
+    "8": (
+        "Ataque con CVEs + SOC",
+        "Ejecuta un escaneo de vulnerabilidades con nmap NSE (--script vuln,smb-vuln*) mientras "
+        "el Blue Team captura el tráfico con tcpdump. La IA clasifica la amenaza, "
+        "calcula CVSS y genera un reporte forense con explicación técnica y mitigaciones.",
+        "sudo nmap -Pn -sT -sV -f -g 53 -T5 --data-length 24 --spoof-mac 0 -p <puertos> --script vuln,smb-vuln* <target_ip>",
+    ),
+    "9": (
+        "MS17-010 sin exfiltración + SOC",
+        "Ejecuta el exploit EternalBlue contra el objetivo vulnerable mientras el Blue Team "
+        "captura el tráfico SMB con tcpdump. La IA analiza la actividad de red para detectar "
+        "la explotación y genera un reporte forense completo con CVSS y mitigaciones.",
+        None,
+    ),
+    "10": (
+        "MS17-010 con exfiltración + SOC",
+        "Ejecuta el exploit EternalBlue y extrae archivos sensibles del usuario, todo mientras "
+        "el Blue Team captura el tráfico de red. La IA analiza los logs para detectar tanto "
+        "la explotación como la exfiltración, generando un reporte completo.",
+        None,
+    ),
+}
+
+
+def _mostrar_explicacion(opcion: str):
+    if opcion not in _explicaciones:
+        return
+    titulo, descripcion, comando = _explicaciones[opcion]
+    elements = [descripcion]
+    if comando:
+        elements.append(RichText(""))
+        elements.append(
+            Syntax(comando, "bash", theme="monokai", word_wrap=True)
+        )
+    panel = Panel(
+        RichGroup(*elements),
+        title=f"[bold cyan]⚡ {titulo}[/]",
+        border_style="cyan",
+        box=box.ROUNDED,
+    )
+    console.print(panel)
+
+
 def _mostrar_pantalla_acciones():
     console.print("\n" * 2)
     banner(f"COMPUTER DIGITAL TWIN — [bold white]{os_actual}[/]")
@@ -228,6 +325,7 @@ def pantalla_acciones():
 
     while True:
         opcion = _mostrar_pantalla_acciones()
+        _mostrar_explicacion(opcion)
 
         if opcion == "0":
             banner("Saliendo...", "bold red")
